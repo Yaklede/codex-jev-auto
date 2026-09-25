@@ -71,7 +71,16 @@ uv run jev-auto sync-catalog
 uv run jev-auto restore
 ```
 
-Codex 0.154의 `codex_exec` 클라이언트에서는 GPT-6 Sol/Luna가 목록에 있어도 ChatGPT 백엔드가 직접 호출을 거절하는 것을 관찰했다. 이 클라이언트의 자동 라우팅은 Terra/Astra로 제한한다. Desktop은 동일한 제한을 확인하지 않았으므로 이 CLI 제한을 적용하지 않는다. 다른 구체 모델을 선택한 요청은 모델을 바꾸지 않고 프록시를 통과한다.
+### GPT-6 Sol/Luna 사용 범위
+
+| Jev Auto 진입 경로 | Sol/Luna 후보 | 확인 상태 |
+| --- | --- | --- |
+| Codex CLI 0.157의 `codex exec -m jev-auto` | 포함 | Sol/Luna 직접 호출과 Jev Auto가 각각으로 라우팅한 호출이 모두 성공했다. |
+| 구버전 CLI의 `codex_exec` 요청 | 제외 | 0.154에서 두 모델의 직접 호출이 거절됐다. 라우터는 0.156 미만 CLI에 보수적으로 Terra/Astra 후보만 허용한다. Astra는 별도 승인 전 차단된다. |
+| Codex Desktop의 `$jev-auto` 스킬 | 포함 | 기본 서브에이전트에 선택값을 전달한다. Luna 서브에이전트의 간단한 실행은 확인했다. |
+| Codex Desktop 모델 선택기의 `Jev Auto` | 포함 | CLI 제한을 적용하지 않는다. Desktop에서 Sol/Luna를 선택한 턴의 백엔드 성공 여부는 아직 확인하지 않았다. |
+
+따라서 **현재 설치된 CLI 0.157의 Jev Auto에서는 GPT-6 Sol/Luna를 사용할 수 있다.** 모델 카탈로그에 보이는 것과 실제 백엔드 호출 성공은 구분해야 한다. 다른 구체 모델을 직접 선택한 요청은 프록시가 모델을 바꾸지 않고 전달한다.
 
 ## 동작과 범위
 

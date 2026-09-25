@@ -61,4 +61,5 @@ def test_astra_is_blocked_before_upstream(monkeypatch):
 
 def test_cli_compatibility_filter_does_not_reduce_desktop_candidates():
     assert auto_proxy._allowed_models("Codex Desktop/0.154.0 (codex_exec; 0.154.0)") == {"gpt-5.6-terra", "gpt-6-astra"}
+    assert auto_proxy._allowed_models("Codex Desktop/0.157.0 (codex_exec; 0.157.0)") is None
     assert auto_proxy._allowed_models("Codex Desktop/0.154.0") is None
