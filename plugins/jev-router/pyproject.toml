@@ -5,12 +5,16 @@ description = "Local Open Jev router for Codex model and reasoning effort select
 requires-python = ">=3.11"
 dependencies = [
   "httpx>=0.27,<1",
-  "mcp>=1.15,<2",
   "openai-codex>=0.1",
+  "starlette>=0.48,<1",
+  "tomlkit>=0.13,<1",
+  "uvicorn>=0.35,<1",
+  "websockets>=13,<17",
+  "zstandard>=0.23,<1",
 ]
 
 [project.scripts]
-jev-router-mcp = "jev_router.mcp_server:main"
+jev-auto = "jev_router.auto_cli:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -20,4 +24,4 @@ build-backend = "hatchling.build"
 packages = ["src/jev_router"]
 
 [dependency-groups]
-dev = ["pytest>=8,<10"]
+dev = ["mcp>=1.15,<2", "pytest>=8,<10"]
