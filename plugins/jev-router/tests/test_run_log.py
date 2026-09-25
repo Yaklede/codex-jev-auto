@@ -1,4 +1,5 @@
 import subprocess
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -38,3 +39,19 @@ def test_route_outcome_and_feedback_survive_reloads(tmp_path):
 def test_run_id_cannot_escape_run_directory(tmp_path):
     with pytest.raises(ValueError, match="Invalid run ID"):
         run_log.finish(tmp_path, "../../config.toml", "completed", [])
+
+
+def test_parallel_finish_cannot_overwrite_first_outcome(tmp_path):
+    decision = Decision(Candidate("gpt-6-sol", "medium"), "test", None, 1, Profile("general", "focused", 0, (), False))
+    run_id = run_log.start(tmp_path, decision, None)["run_id"]
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda check: _finish_or_error(tmp_path, run_id, check), ("first", "second")))
+    assert sorted(results) == ["ValueError", "completed"]
+    assert run_log.recent(tmp_path)[0]["outcome"]["checks"] in (["first"], ["second"])
+
+
+def _finish_or_error(directory, run_id, check):
+    try:
+        return run_log.finish(directory, run_id, "completed", [check])["outcome"]["status"]
+    except ValueError:
+        return "ValueError"

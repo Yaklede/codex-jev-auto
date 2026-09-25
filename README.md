@@ -4,12 +4,14 @@ Jev Auto는 로컬 Open Jev로 Codex 작업에 사용할 모델과 추론 강도
 
 ## 동작 원리
 
-메인 작업에서 `$jev-auto` 스킬을 호출하면 메인 작업의 모델과 대화는 유지된다. 스킬은 사용자 요청과 저장소의 간단한 프로필을 로컬 CLI에 전달한다. 라우터는 사용 가능한 조합을 조회하고 작업 난도에 따른 후보 범위를 정한 뒤, Open Jev의 순위를 사용해 모델과 추론 강도를 고른다. Open Jev가 준비되지 않았거나 점수가 불안정하면 정책 기본값을 사용한다. 메인 작업은 선택값으로 **Codex 기본 서브에이전트**를 실행하고 결과를 검증한다. 별도 사용자 작업은 만들지 않는다.
+메인 작업에서 `$jev-auto` 스킬을 호출하면 메인 작업의 모델과 대화는 유지된다. 독립적으로 나눌 수 있는 작업이 있으면 메인이 작업별로 모델을 골라 **Codex 기본 서브에이전트**에 맡기고 결과를 통합한다. 병렬로 실행할 수 있는 작업은 동시에 시작한다. 작거나 긴밀히 결합된 작업은 메인에서 처리한다. 별도 사용자 작업은 만들지 않는다.
 
 ```mermaid
 flowchart TD
     U["사용자 요청"] --> MAIN["기존 메인 작업: $jev-auto 호출"]
-    MAIN --> CLI["로컬 CLI: 요청 + 저장소 프로필"]
+    MAIN --> SPLIT{"독립적인 하위 작업?"}
+    SPLIT -->|없음| DIRECT["메인에서 직접 처리·검증"]
+    SPLIT -->|있음| CLI["각 하위 작업을 로컬 CLI로 라우팅"]
     CLI --> CAND["계정에서 지원하는 모델·강도 조합 조회"]
     CAND --> POLICY["작업 난도 정책으로 후보 범위 결정"]
     POLICY --> JEV["Open Jev + Gemma 3: 후보 점수화"]
@@ -28,7 +30,7 @@ flowchart TD
     RUN --> FEEDBACK["선택 사항: 사용자 평가 연결"]
 ```
 
-모델 선택기에서 **Jev Auto**를 직접 고르면 현재 작업의 턴 자체가 라우팅된다. 설치기가 추가한 `model_catalog_json` 항목을 Codex가 읽고, `openai_base_url`로 연결한 로컬 Responses 프록시가 `jev-auto` 요청의 `model`과 `reasoning.effort`를 실제 선택값으로 바꿔 상위 API에 전달한다. 다른 구체 모델을 선택한 요청은 모델을 바꾸지 않고 통과한다. 이 경로는 서브에이전트를 자동 생성하지 않는다.
+모델 선택기에서 **Jev Auto**를 고르면 프록시가 메인 작업의 턴에 사용할 모델·추론 강도를 고른다. 또한 메인 에이전트에 조정 정책을 전달한다. 메인은 독립적인 하위 작업이 여러 개라고 판단하면 별도 스킬 호출 없이 각각 라우팅하고 기본 서브에이전트를 병렬 실행하도록 지시받는다. 프록시 자체가 에이전트를 생성하는 것은 아니며, 다른 구체 모델을 선택한 요청에는 조정 정책을 추가하지 않는다.
 
 ```mermaid
 flowchart TD
@@ -38,13 +40,19 @@ flowchart TD
     PROXY --> PROFILE["요청 텍스트로 작업 프로필 생성"]
     PROFILE --> ROUTE["후보 정책 + Open Jev 점수화 또는 기본값"]
     ROUTE --> GATE{"Astra 추천?"}
-    GATE -->|예| BLOCK["승인 필요 오류로 턴 중단"]
-    GATE -->|아니오| REWRITE["model·reasoning.effort 교체"]
-    REWRITE --> UPSTREAM["기존 Codex 인증으로 상위 Responses API 호출"]
-    UPSTREAM --> SAME["응답이 같은 작업으로 돌아옴"]
+    GATE -->|예| SAFE["비 Astra 모델로 메인 턴 실행·승인 요청"]
+    GATE -->|아니오| REWRITE["선택 모델로 메인 턴 실행"]
+    SAFE --> POLICY["메인에 조정·위임 지시 전달"]
+    REWRITE --> POLICY
+    POLICY --> SPLIT{"독립적인 하위 작업?"}
+    SPLIT -->|없음| DIRECT["메인이 직접 작업"]
+    SPLIT -->|있음| SUBROUTE["하위 작업별 Jev 라우팅"]
+    SUBROUTE --> AGENTS["Codex 기본 서브에이전트 병렬 실행"]
+    AGENTS --> VERIFY["메인이 결과 통합·검증"]
+    DIRECT --> VERIFY
 ```
 
-메인 작업을 조정자로 유지하고 구현 모델만 바꾸려면 **`$jev-auto` 스킬 경로**를 사용한다. Astra 추천은 항상 실행 전에 사용자 확인을 받는다. 모델 선택기의 직접 라우팅은 Astra 추천 시 차단하므로, 승인 후 Astra 계획과 Sol 구현을 이어 가려면 스킬 경로를 사용한다. 기본 서브에이전트의 파일 쓰기를 기술적으로 막는 옵션은 없어 Astra의 계획 전용 범위는 지시와 메인 작업의 변경 상태 점검으로 확인한다.
+**Jev Auto 모델만 선택해도 메인 작업이 필요에 따라 서브에이전트를 위임하도록 지시**한다. 프록시는 작업 분류 결과만 전달할 수 있으며, 서브에이전트를 실제로 열지 여부는 메인 모델과 Codex 협업 도구가 결정한다. Astra가 추천되면 메인 턴은 비 Astra 모델로 실행된다. Astra 서브에이전트의 승인 확인과 계획 전용 역할은 현재 메인에 전달된 지시로 관리하며, 도구 호출 자체를 프록시가 기술적으로 차단하지는 못한다. 승인 전 Astra를 메인 모델로 보내지는 않는다. 실제 Desktop 자동 위임과 승인 흐름은 아직 검증되지 않았다.
 
 ## 설치
 
@@ -84,7 +92,7 @@ uv run jev-auto restore
 | Jev Auto 진입 경로 | Sol/Luna 후보 | 확인 상태 |
 | --- | --- | --- |
 | Codex CLI 0.157의 `codex exec -m jev-auto` | 포함 | Sol/Luna 직접 호출과 Jev Auto가 각각으로 라우팅한 호출이 모두 성공했다. |
-| 구버전 CLI의 `codex_exec` 요청 | 제외 | 0.154에서 두 모델의 직접 호출이 거절됐다. 라우터는 0.156 미만 CLI에 보수적으로 Terra/Astra 후보만 허용한다. Astra는 별도 승인 전 차단된다. |
+| 구버전 CLI의 `codex_exec` 요청 | 제외 | 0.154에서 두 모델의 직접 호출이 거절됐다. 라우터는 0.156 미만 CLI에 보수적으로 Terra/Astra 후보만 허용한다. Astra가 추천되면 Terra 메인 턴에서 승인을 묻는다. |
 | Codex Desktop의 `$jev-auto` 스킬 | 포함 | 기본 서브에이전트에 선택값을 전달한다. Luna 서브에이전트의 간단한 실행은 확인했다. |
 | Codex Desktop 모델 선택기의 `Jev Auto` | 포함 | CLI 제한을 적용하지 않는다. Desktop에서 Sol/Luna를 선택한 턴의 백엔드 성공 여부는 아직 확인하지 않았다. |
 
@@ -92,7 +100,7 @@ uv run jev-auto restore
 
 ## 동작과 범위
 
-프록시는 `127.0.0.1:18084`에서 Responses HTTP/WebSocket 요청을 받아, `jev-auto`일 때만 모델·추론 강도를 바꾼다. 기존 Codex 로그인 헤더를 상위 서버로 전달한다. 요청 본문과 인증 토큰은 라우팅 로그에 저장하지 않는다. 선택 결과는 `~/.local/share/jev-router/auto-decisions.jsonl`에 모델·강도·정책 근거로 남는다. 스킬 경로는 `route`가 반환한 실행 ID를 기준으로 `~/.local/share/jev-router/runs/`에 선택·실제로 실행한 서브에이전트 모델과 ID·작업 전후 Git 상태·확인한 검사·선택적 사용자 평가를 이어 저장한다. Git 상태만으로 변경의 품질을 판정하지 않으며, 사용자 평가는 객관적 검증과 구분한다. 모델 선택기 프록시 경로는 현재 선택 기록만 남기고 코드 품질 결과까지 자동으로 연결하지 않는다. Open Jev 점수는 상대적인 옵션 순위이며 실제 성공률이 아니다.
+프록시는 `127.0.0.1:18084`에서 Responses HTTP/WebSocket 요청을 받아, `jev-auto`일 때만 모델·추론 강도를 바꾼다. 기존 Codex 로그인 헤더를 상위 서버로 전달한다. 요청 본문과 인증 토큰은 라우팅 로그에 저장하지 않는다. 선택 결과는 `~/.local/share/jev-router/auto-decisions.jsonl`에 추천 모델·메인 실행 모델·강도·정책 근거로 남는다. 서브에이전트별 CLI `route`는 실행 ID를 반환하며, 그 ID를 기준으로 `~/.local/share/jev-router/runs/`에 실제 실행한 모델·에이전트 ID·작업 전후 Git 상태·검사·선택적 사용자 평가를 이어 저장한다. 프록시가 라우팅한 메인 턴에는 아직 실행 결과가 연결되지 않는다. Git 상태와 사용자 평가만으로 변경 품질을 단정하지 않는다. Open Jev 점수는 상대적인 옵션 순위이며 실제 성공률이 아니다.
 
 `doctor`는 설치 설정, 카탈로그 파일, 로컬 서비스, Codex CLI에서 `jev-auto`가 조회되는지를 확인한다. Desktop 선택기 표시와 실제 Desktop 턴의 백엔드 호출은 이 명령으로 증명할 수 없으므로 `unverified`로 표시한다.
 

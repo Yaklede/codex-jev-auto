@@ -21,7 +21,8 @@ from starlette.responses import JSONResponse, Response, StreamingResponse
 from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from .auto_routing import AutoRouter, VIRTUAL_MODEL, latest_user_text
+from .auto_routing import AutoRouter, CoordinatorUnavailable, VIRTUAL_MODEL, latest_user_text
+from .orchestration import apply as apply_orchestration
 
 
 _HOP_HEADERS = {
@@ -87,18 +88,21 @@ async def responses(request: Request) -> Response:
     if not isinstance(payload, dict) or not isinstance(payload.get("model"), str):
         return JSONResponse({"error": {"code": "invalid_request", "message": "Missing model"}}, status_code=400)
     if payload["model"] == VIRTUAL_MODEL:
-        routed = await request.app.state.router.route(payload, _allowed_models(request.headers.get("user-agent")))
-        if routed.decision.candidate.requires_confirmation:
+        try:
+            routed = await request.app.state.router.route(payload, _allowed_models(request.headers.get("user-agent")))
+        except CoordinatorUnavailable as exc:
+            return JSONResponse({"error": {"code": "coordinator_unavailable", "message": str(exc)}}, status_code=409)
+        if routed.payload["model"] == "gpt-6-astra":
             return JSONResponse(
                 {"error": {
                     "code": "astra_approval_required",
-                    "message": "Jev recommends GPT-6 Astra for read-only planning. Ask the user for explicit confirmation before starting an Astra planning subagent, then use GPT-6 Sol for implementation.",
+                    "message": "Jev Auto could not find a non-Astra coordinator model for this request.",
                     "route_key": routed.route_key,
                     "recommended_effort": routed.decision.candidate.effort,
                 }},
                 status_code=409,
             )
-        payload = routed.payload
+        payload = apply_orchestration(routed.payload, routed.decision)
     try:
         upstream_base = _base(_upstream(request))
     except ValueError as exc:
@@ -147,7 +151,8 @@ async def websocket_responses(websocket: WebSocket) -> None:
                     message = event.get("text") if event.get("text") is not None else event.get("bytes")
                     if message is None:
                         continue
-                    if isinstance(message, str):
+                    if isinstance(message, (str, bytes)):
+                        binary = isinstance(message, bytes)
                         try:
                             frame = json.loads(message)
                         except (ValueError, TypeError):
@@ -170,18 +175,28 @@ async def websocket_responses(websocket: WebSocket) -> None:
                                 if synthetic_input:
                                     route_input = dict(response)
                                     route_input["input"] = [{"role": "user", "content": [{"type": "input_text", "text": last_user_text}]}]
-                                routed = await websocket.app.state.router.route(route_input, _allowed_models(websocket.headers.get("user-agent")))
-                                if routed.decision.candidate.requires_confirmation:
+                                try:
+                                    routed = await websocket.app.state.router.route(route_input, _allowed_models(websocket.headers.get("user-agent")))
+                                except CoordinatorUnavailable:
+                                    await websocket.close(code=1008, reason="No non-Astra coordinator is available")
+                                    return
+                                if routed.payload["model"] == "gpt-6-astra":
                                     await websocket.close(code=1008, reason="Astra planning needs user confirmation")
                                     return
-                                routed_payload = dict(routed.payload)
+                                routed_payload = apply_orchestration(routed.payload, routed.decision)
                                 if synthetic_input:
-                                    routed_payload.pop("input", None)
+                                    # The synthetic user text is only for routing. Preserve
+                                    # any real tool output already present in this frame.
+                                    if "input" in response:
+                                        routed_payload["input"] = response["input"]
+                                    else:
+                                        routed_payload.pop("input", None)
                                 if response is frame:
                                     frame = routed_payload
                                 else:
                                     frame["response"] = routed_payload
-                                message = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
+                                serialized = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
+                                message = serialized.encode("utf-8") if binary else serialized
                     await upstream.send(message)
 
             async def upstream_to_client() -> None:

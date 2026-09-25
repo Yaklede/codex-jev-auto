@@ -20,6 +20,10 @@ from .routing import Candidate, Decision, Profile, choose, fallback, inspect_rep
 VIRTUAL_MODEL = "jev-auto"
 
 
+class CoordinatorUnavailable(RuntimeError):
+    """An Astra recommendation cannot be handled without a non-Astra main model."""
+
+
 def latest_user_text(payload: dict[str, Any]) -> str:
     """Codex resends the turn history after tools; keep the latest user prompt."""
     for item in reversed(payload.get("input") or []):
@@ -56,7 +60,7 @@ class AutoRouter:
     def __init__(self, data_directory: Path, jev_url: str | None = None) -> None:
         self.data_directory = data_directory
         self.jev_url = jev_url or os.environ.get("OPENJEV_URL", "http://127.0.0.1:8000")
-        self._routes: dict[str, tuple[float, Decision]] = {}
+        self._routes: dict[str, tuple[float, Decision, Candidate]] = {}
         self._candidates: tuple[float, list[Candidate]] | None = None
         self._lock = asyncio.Lock()
 
@@ -104,28 +108,41 @@ class AutoRouter:
             cached = self._routes.get(route_key)
             if cached and time.monotonic() - cached[0] < 7200:
                 decision = cached[1]
+                coordinator = cached[2]
             else:
                 decision = await self.decide(request, allowed_models=allowed_models)
-                self._routes[route_key] = (time.monotonic(), decision)
+                if decision.candidate.requires_confirmation:
+                    available = await self.candidates()
+                    if allowed_models is not None:
+                        available = [candidate for candidate in available if candidate.model in allowed_models]
+                    try:
+                        coordinator = fallback(available)
+                    except RuntimeError as exc:
+                        raise CoordinatorUnavailable("No non-Astra coordinator model is available") from exc
+                else:
+                    coordinator = decision.candidate
+                self._routes[route_key] = (time.monotonic(), decision, coordinator)
                 if len(self._routes) > 512:
                     oldest = sorted(self._routes, key=lambda key: self._routes[key][0])[:128]
                     for key in oldest:
                         self._routes.pop(key, None)
-                self._record(route_key, decision)
+                self._record(route_key, decision, coordinator)
         concrete = dict(payload)
-        concrete["model"] = decision.candidate.model
+        concrete["model"] = coordinator.model
         reasoning = dict(concrete.get("reasoning") or {})
-        reasoning["effort"] = decision.candidate.effort
+        reasoning["effort"] = coordinator.effort
         concrete["reasoning"] = reasoning
         return RoutedRequest(concrete, decision, route_key)
 
-    def _record(self, route_key: str, decision: Decision) -> None:
+    def _record(self, route_key: str, decision: Decision, coordinator: Candidate) -> None:
         self.data_directory.mkdir(parents=True, exist_ok=True)
         record = {
             "time": time.time(),
             "route_key": route_key,
             "model": decision.candidate.model,
             "effort": decision.candidate.effort,
+            "coordinator_model": coordinator.model,
+            "coordinator_effort": coordinator.effort,
             "reason": decision.reason,
             "policy_band": decision.policy_band,
             "astra_confirmation_required": decision.candidate.requires_confirmation,
