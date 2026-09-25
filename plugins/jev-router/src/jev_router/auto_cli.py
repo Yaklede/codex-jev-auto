@@ -22,6 +22,8 @@ import uvicorn
 from .auto_catalog import sync_catalog
 from .auto_proxy import create_app, data_directory
 from .auto_routing import AutoRouter
+from .doctor import diagnose
+from . import run_log
 
 
 LABEL = "com.jevrouter.auto"
@@ -173,9 +175,21 @@ def main() -> None:
     setup.add_argument("--port", type=int, default=DEFAULT_PORT)
     sub.add_parser("restore", help="Restore previous Codex configuration")
     sub.add_parser("sync-catalog", help="Refresh the merged Codex catalog")
+    sub.add_parser("doctor", help="Check the local Codex catalog and Jev services")
     route = sub.add_parser("route", help="Score a subagent task before spawning")
     route.add_argument("request")
     route.add_argument("--workspace", type=Path)
+    finish = sub.add_parser("finish", help="Record a routed task's verified outcome")
+    finish.add_argument("run_id")
+    finish.add_argument("--status", choices=("completed", "failed", "interrupted"), required=True)
+    finish.add_argument("--check", action="append", default=[], help="Observed check result; repeat as needed")
+    finish.add_argument("--agent", action="append", nargs=3, metavar=("MODEL", "EFFORT", "ID"), default=[], help="Actually spawned agent; repeat for Astra plan and Sol implementation")
+    feedback = sub.add_parser("feedback", help="Attach user feedback to a finished run")
+    feedback.add_argument("run_id")
+    feedback.add_argument("--rating", choices=("good", "bad", "mixed"), required=True)
+    feedback.add_argument("--note")
+    recent = sub.add_parser("runs", help="Show recent routing decisions and outcomes")
+    recent.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
     if args.command == "serve":
         uvicorn.run(create_app(), host="127.0.0.1", port=args.port, access_log=False, log_level="warning")
@@ -187,11 +201,22 @@ def main() -> None:
             result = restore()
         elif args.command == "sync-catalog":
             result = {"catalog": str(sync_catalog(data_directory()))}
-        else:
+        elif args.command == "doctor":
+            result = diagnose()
+        elif args.command == "route":
             directory = data_directory()
             directory.mkdir(parents=True, exist_ok=True)
             decision = asyncio.run(AutoRouter(directory).decide(args.request, args.workspace))
             result = decision.to_dict()
+            result["run_id"] = run_log.start(directory, decision, args.workspace)["run_id"]
+        elif args.command == "finish":
+            result = run_log.finish(data_directory(), args.run_id, args.status, args.check, args.agent)
+        elif args.command == "feedback":
+            result = run_log.feedback(data_directory(), args.run_id, args.rating, args.note)
+        else:
+            if not 1 <= args.limit <= 100:
+                raise ValueError("--limit must be between 1 and 100")
+            result = run_log.recent(data_directory(), args.limit)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except Exception as exc:
         print(f"jev-auto: {type(exc).__name__}: {exc}", file=sys.stderr)

@@ -24,6 +24,8 @@ flowchart TD
     CONFIRM -->|거절| SOL
     AGENT --> VERIFY["메인 작업: 변경 사항·테스트 검증"]
     SOL --> VERIFY
+    VERIFY --> RUN["실행 ID에 결과·검사 기록"]
+    RUN --> FEEDBACK["선택 사항: 사용자 평가 연결"]
 ```
 
 모델 선택기에서 **Jev Auto**를 직접 고르면 현재 작업의 턴 자체가 라우팅된다. 설치기가 추가한 `model_catalog_json` 항목을 Codex가 읽고, `openai_base_url`로 연결한 로컬 Responses 프록시가 `jev-auto` 요청의 `model`과 `reasoning.effort`를 실제 선택값으로 바꿔 상위 API에 전달한다. 다른 구체 모델을 선택한 요청은 모델을 바꾸지 않고 통과한다. 이 경로는 서브에이전트를 자동 생성하지 않는다.
@@ -62,9 +64,15 @@ codex plugin add jev-router@personal
 # 상태 확인
 curl http://127.0.0.1:18084/healthz
 codex debug models
+~/.local/share/jev-router/bin/jev-auto doctor
 
 # 메인 작업에서 사용할 서브에이전트 모델 사전 선택
 ~/.local/share/jev-router/bin/jev-auto route '요청 내용' --workspace /absolute/repo/path
+
+# 실행 결과와 사후 피드백
+~/.local/share/jev-router/bin/jev-auto finish RUN_ID --status completed --agent gpt-6-sol medium AGENT_ID --check 'pytest: 24 passed'
+~/.local/share/jev-router/bin/jev-auto feedback RUN_ID --rating mixed --note '동작하지만 코드가 복잡함'
+~/.local/share/jev-router/bin/jev-auto runs --limit 10
 
 # 카탈로그 갱신 / 설정 복원
 uv run jev-auto sync-catalog
@@ -84,6 +92,8 @@ uv run jev-auto restore
 
 ## 동작과 범위
 
-프록시는 `127.0.0.1:18084`에서 Responses HTTP/WebSocket 요청을 받아, `jev-auto`일 때만 모델·추론 강도를 바꾼다. 기존 Codex 로그인 헤더를 상위 서버로 전달한다. 요청 본문과 인증 토큰은 라우팅 로그에 저장하지 않는다. 선택 결과는 `~/.local/share/jev-router/auto-decisions.jsonl`에 모델·강도·정책 근거로 남는다. Open Jev 점수는 상대적인 옵션 순위이며 실제 성공률이 아니다.
+프록시는 `127.0.0.1:18084`에서 Responses HTTP/WebSocket 요청을 받아, `jev-auto`일 때만 모델·추론 강도를 바꾼다. 기존 Codex 로그인 헤더를 상위 서버로 전달한다. 요청 본문과 인증 토큰은 라우팅 로그에 저장하지 않는다. 선택 결과는 `~/.local/share/jev-router/auto-decisions.jsonl`에 모델·강도·정책 근거로 남는다. 스킬 경로는 `route`가 반환한 실행 ID를 기준으로 `~/.local/share/jev-router/runs/`에 선택·실제로 실행한 서브에이전트 모델과 ID·작업 전후 Git 상태·확인한 검사·선택적 사용자 평가를 이어 저장한다. Git 상태만으로 변경의 품질을 판정하지 않으며, 사용자 평가는 객관적 검증과 구분한다. 모델 선택기 프록시 경로는 현재 선택 기록만 남기고 코드 품질 결과까지 자동으로 연결하지 않는다. Open Jev 점수는 상대적인 옵션 순위이며 실제 성공률이 아니다.
+
+`doctor`는 설치 설정, 카탈로그 파일, 로컬 서비스, Codex CLI에서 `jev-auto`가 조회되는지를 확인한다. Desktop 선택기 표시와 실제 Desktop 턴의 백엔드 호출은 이 명령으로 증명할 수 없으므로 `unverified`로 표시한다.
 
 1차 범위는 라우팅과 실행 연결이다. 쉬운 백엔드 작업은 단순하게, 어려운 작업에는 필요한 구조를 충분히 적용하는 코드 품질 루프와 정돈된 프론트엔드 코드·더 나은 화면 디자인 평가 루프는 [개발 계획](docs/plan.md)의 다음 단계다. 과거 MCP 시제품의 검증은 [1차 검증 기록](docs/phase1-verification.md)에 남겨 두었다.
