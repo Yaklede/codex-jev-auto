@@ -1,0 +1,22 @@
+{
+  "name": "jev-router",
+  "version": "0.1.0+codex.20260925105746",
+  "description": "Route Codex coding tasks through local Open Jev across four models and five reasoning levels.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Jev Router",
+    "shortDescription": "Choose a Codex model and reasoning level with local Open Jev.",
+    "longDescription": "Classify a coding request and score model and reasoning combinations with Open Jev. Astra requires confirmation and only plans; Sol implements its plan.",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": "Use Jev Router to complete this coding task."
+  },
+  "mcpServers": "./.mcp.json"
+}

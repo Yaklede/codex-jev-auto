@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "jev-router": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "--no-dev", "jev-router-mcp"],
+      "cwd": "."
+    }
+  }
+}
