@@ -1,0 +1,142 @@
+[
+  {
+    "id": "typo",
+    "split": "development",
+    "request": "Fix one spelling mistake in README.md.",
+    "profile": {"kind": "general", "scope": "focused", "file_count": 12, "languages": ["Python"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-luna", "gpt-5.6-terra"],
+    "acceptable_efforts": ["low", "medium"]
+  },
+  {
+    "id": "small_backend",
+    "split": "development",
+    "request": "Backend: Add a missing optional field to a response DTO and update one serializer test.",
+    "profile": {"kind": "backend", "scope": "focused", "file_count": 80, "languages": ["Python"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-luna", "gpt-5.6-terra"],
+    "acceptable_efforts": ["low", "medium"]
+  },
+  {
+    "id": "small_frontend",
+    "split": "development",
+    "request": "Frontend: Rename one button label and keep its current behavior.",
+    "profile": {"kind": "frontend", "scope": "focused", "file_count": 40, "languages": ["React"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-luna", "gpt-5.6-terra"],
+    "acceptable_efforts": ["low", "medium"]
+  },
+  {
+    "id": "backend_feature",
+    "split": "development",
+    "request": "Backend: Add cursor pagination across API handler, service, and repository, with tests for empty and invalid cursors.",
+    "profile": {"kind": "backend", "scope": "focused", "file_count": 500, "languages": ["Kotlin"], "existing_changes": false},
+    "acceptable_models": ["gpt-5.6-terra", "gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high"]
+  },
+  {
+    "id": "frontend_feature",
+    "split": "development",
+    "request": "Frontend: Build an accessible modal with loading, error, keyboard focus, and responsive layout using existing design tokens.",
+    "profile": {"kind": "frontend", "scope": "focused", "file_count": 400, "languages": ["React"], "existing_changes": false},
+    "acceptable_models": ["gpt-5.6-terra", "gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high"]
+  },
+  {
+    "id": "payment_race",
+    "split": "development",
+    "request": "Backend: Debug an intermittent payment settlement race across services and database transactions; fix it without duplicate payouts.",
+    "profile": {"kind": "backend", "scope": "broad", "file_count": 1800, "languages": ["Kotlin"], "existing_changes": true},
+    "acceptable_pairs": ["gpt-6-sol/high", "gpt-6-sol/xhigh", "gpt-6-sol/max", "gpt-6-astra/low", "gpt-6-astra/medium", "gpt-6-astra/high"]
+  },
+  {
+    "id": "migration",
+    "split": "development",
+    "request": "Migrate a multi-module payment architecture and database schema with rollback and compatibility across old and new API clients.",
+    "profile": {"kind": "backend", "scope": "broad", "file_count": 3000, "languages": ["Kotlin"], "existing_changes": true},
+    "acceptable_pairs": ["gpt-6-sol/high", "gpt-6-sol/xhigh", "gpt-6-sol/max", "gpt-6-astra/low", "gpt-6-astra/medium", "gpt-6-astra/high"]
+  },
+  {
+    "id": "ui_redesign",
+    "split": "development",
+    "request": "Frontend: Redesign the entire checkout flow across desktop and mobile, reusing existing components and design tokens, and verify accessibility.",
+    "profile": {"kind": "frontend", "scope": "broad", "file_count": 900, "languages": ["React"], "existing_changes": true},
+    "acceptable_models": ["gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high", "xhigh", "max"]
+  },
+  {
+    "id": "astra_explicit",
+    "split": "development",
+    "request": "Use GPT-6 Astra to analyze a difficult architecture change; wait for my confirmation before running it.",
+    "profile": {"kind": "mixed", "scope": "broad", "file_count": 3000, "languages": ["Kotlin", "React"], "existing_changes": true},
+    "acceptable_models": ["gpt-6-astra"],
+    "acceptable_efforts": ["low", "medium", "high", "xhigh", "max"]
+  },
+  {
+    "id": "extreme_system",
+    "split": "development",
+    "request": "Very difficult task: redesign the entire payment architecture across ten services with a database migration, settlement race, rollback, backward compatibility, security, and a frontend checkout rewrite.",
+    "profile": {"kind": "mixed", "scope": "broad", "file_count": 8000, "languages": ["Kotlin", "React"], "existing_changes": true},
+    "acceptable_pairs": ["gpt-6-astra/low", "gpt-6-astra/medium", "gpt-6-astra/high"]
+  },
+  {
+    "id": "css_typo",
+    "split": "holdout",
+    "request": "Frontend: Correct a typo in one CSS class name without changing the layout.",
+    "profile": {"kind": "frontend", "scope": "focused", "file_count": 120, "languages": ["React"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-luna", "gpt-5.6-terra"],
+    "acceptable_efforts": ["low", "medium"]
+  },
+  {
+    "id": "auth_refactor",
+    "split": "holdout",
+    "request": "Backend: Refactor authorization across four services without changing role-based access behavior; add regression tests for privilege escalation.",
+    "profile": {"kind": "backend", "scope": "broad", "file_count": 1400, "languages": ["Java"], "existing_changes": true},
+    "acceptable_pairs": ["gpt-6-sol/high", "gpt-6-sol/xhigh", "gpt-6-sol/max", "gpt-6-astra/low", "gpt-6-astra/medium", "gpt-6-astra/high"]
+  },
+  {
+    "id": "form_feature",
+    "split": "development",
+    "request": "Frontend: Add a form with validation, loading, and error states using the existing shared components and state pattern.",
+    "profile": {"kind": "frontend", "scope": "focused", "file_count": 350, "languages": ["React"], "existing_changes": false},
+    "acceptable_models": ["gpt-5.6-terra", "gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high"]
+  },
+  {
+    "id": "n_plus_one",
+    "split": "development",
+    "request": "Backend: Find and fix an N+1 database query across the service and repository, preserving pagination and adding a regression test.",
+    "profile": {"kind": "backend", "scope": "focused", "file_count": 600, "languages": ["Kotlin"], "existing_changes": false},
+    "acceptable_models": ["gpt-5.6-terra", "gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high"]
+  },
+  {
+    "id": "readme_link",
+    "split": "holdout",
+    "request": "Fix a single broken link in README.md and leave all code unchanged.",
+    "profile": {"kind": "general", "scope": "focused", "file_count": 90, "languages": ["Python"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-luna", "gpt-5.6-terra"],
+    "acceptable_efforts": ["low", "medium"]
+  },
+  {
+    "id": "backend_idempotency",
+    "split": "holdout",
+    "request": "Backend: Add idempotency key handling across the API handler, service, and database, with retry tests.",
+    "profile": {"kind": "backend", "scope": "focused", "file_count": 700, "languages": ["Kotlin"], "existing_changes": false},
+    "acceptable_models": ["gpt-5.6-terra", "gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high"]
+  },
+  {
+    "id": "dashboard_redesign",
+    "split": "holdout",
+    "request": "Frontend: Redesign the entire dashboard across five pages using shared design tokens and responsive components.",
+    "profile": {"kind": "frontend", "scope": "broad", "file_count": 1000, "languages": ["React"], "existing_changes": true},
+    "acceptable_models": ["gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high", "xhigh", "max"]
+  },
+  {
+    "id": "deadlock",
+    "split": "holdout",
+    "request": "Backend: Diagnose an intermittent database deadlock across services and fix it with rollback-safe tests.",
+    "profile": {"kind": "backend", "scope": "broad", "file_count": 2200, "languages": ["Java"], "existing_changes": true},
+    "acceptable_models": ["gpt-6-sol"],
+    "acceptable_efforts": ["high", "xhigh", "max"]
+  }
+]

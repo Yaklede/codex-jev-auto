@@ -1,0 +1,65 @@
+[
+  {
+    "id": "config_constant",
+    "split": "holdout",
+    "request": "Change the default retry count from 3 to 4 in one configuration file, leaving behavior elsewhere unchanged.",
+    "profile": {"kind": "backend", "scope": "focused", "file_count": 200, "languages": ["Python"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-luna", "gpt-5.6-terra"],
+    "acceptable_efforts": ["low", "medium"]
+  },
+  {
+    "id": "one_test_assertion",
+    "split": "holdout",
+    "request": "Update a single unit test assertion for the existing formatter; do not change production code.",
+    "profile": {"kind": "general", "scope": "focused", "file_count": 60, "languages": ["TypeScript"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-luna", "gpt-5.6-terra"],
+    "acceptable_efforts": ["low", "medium"]
+  },
+  {
+    "id": "csv_export",
+    "split": "holdout",
+    "request": "Backend: Implement a CSV export endpoint with pagination, streaming response, and tests for failure handling.",
+    "profile": {"kind": "backend", "scope": "focused", "file_count": 550, "languages": ["Java"], "existing_changes": false},
+    "acceptable_models": ["gpt-5.6-terra", "gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high"]
+  },
+  {
+    "id": "autocomplete",
+    "split": "holdout",
+    "request": "Frontend: Add an autocomplete component with keyboard navigation, loading and empty states, using shared tokens.",
+    "profile": {"kind": "frontend", "scope": "focused", "file_count": 400, "languages": ["React"], "existing_changes": false},
+    "acceptable_models": ["gpt-5.6-terra", "gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high"]
+  },
+  {
+    "id": "token_leak",
+    "split": "holdout",
+    "request": "Backend: Fix an auth token leak across services and add regression tests for unauthorized access.",
+    "profile": {"kind": "backend", "scope": "broad", "file_count": 1300, "languages": ["Kotlin"], "existing_changes": true},
+    "acceptable_models": ["gpt-6-sol"],
+    "acceptable_efforts": ["high", "xhigh", "max"]
+  },
+  {
+    "id": "build_refactor",
+    "split": "holdout",
+    "request": "Refactor the build pipeline across packages while preserving CI and release behavior.",
+    "profile": {"kind": "general", "scope": "broad", "file_count": 1700, "languages": ["TypeScript"], "existing_changes": true},
+    "acceptable_models": ["gpt-6-sol"],
+    "acceptable_efforts": ["medium", "high", "xhigh", "max"]
+  },
+  {
+    "id": "schema_rollout",
+    "split": "holdout",
+    "request": "Backend: Migrate the database schema across multiple modules with a rollback path and compatibility tests.",
+    "profile": {"kind": "backend", "scope": "broad", "file_count": 2400, "languages": ["Kotlin"], "existing_changes": true},
+    "acceptable_pairs": ["gpt-6-sol/high", "gpt-6-sol/xhigh", "gpt-6-sol/max", "gpt-6-astra/low", "gpt-6-astra/medium", "gpt-6-astra/high"]
+  },
+  {
+    "id": "cache_concurrency",
+    "split": "holdout",
+    "request": "Backend: Investigate a flaky concurrency bug in the caching layer and preserve correctness under parallel requests.",
+    "profile": {"kind": "backend", "scope": "focused", "file_count": 800, "languages": ["Java"], "existing_changes": false},
+    "acceptable_models": ["gpt-6-sol"],
+    "acceptable_efforts": ["high", "xhigh", "max"]
+  }
+]

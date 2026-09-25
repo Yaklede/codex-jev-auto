@@ -1,0 +1,119 @@
+[
+  {
+    "id": "typo",
+    "split": "development",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.12343948164039201,
+    "compared": 20
+  },
+  {
+    "id": "small_backend",
+    "split": "development",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.13310118982011915,
+    "compared": 20
+  },
+  {
+    "id": "small_frontend",
+    "split": "development",
+    "selected": "gpt-6-luna/medium",
+    "acceptable": true,
+    "reason": "open_jev_ranked",
+    "score": 0.09962365710591782,
+    "compared": 20
+  },
+  {
+    "id": "backend_feature",
+    "split": "development",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.2089003131225536,
+    "compared": 20
+  },
+  {
+    "id": "frontend_feature",
+    "split": "development",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.09489012502575664,
+    "compared": 20
+  },
+  {
+    "id": "payment_race",
+    "split": "development",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.09686428755268242,
+    "compared": 20
+  },
+  {
+    "id": "migration",
+    "split": "development",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.1072602660434921,
+    "compared": 20
+  },
+  {
+    "id": "ui_redesign",
+    "split": "development",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.08139255025075001,
+    "compared": 20
+  },
+  {
+    "id": "astra_explicit",
+    "split": "development",
+    "selected": "gpt-6-astra/high",
+    "acceptable": true,
+    "reason": "open_jev_ranked",
+    "score": 0.09621448482892324,
+    "compared": 20
+  },
+  {
+    "id": "css_typo",
+    "split": "holdout",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.09436561186080175,
+    "compared": 20
+  },
+  {
+    "id": "auth_refactor",
+    "split": "holdout",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.15793081755098184,
+    "compared": 20
+  },
+  {
+    "id": "form_feature",
+    "split": "holdout",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.10162712809885426,
+    "compared": 20
+  },
+  {
+    "id": "n_plus_one",
+    "split": "holdout",
+    "selected": "gpt-6-luna/high",
+    "acceptable": false,
+    "reason": "open_jev_ranked",
+    "score": 0.12130582664984606,
+    "compared": 20
+  }
+]

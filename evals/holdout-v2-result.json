@@ -1,0 +1,82 @@
+[
+  {
+    "id": "config_constant",
+    "split": "holdout",
+    "selected": "gpt-5.6-terra/high",
+    "workflow": "direct_execution",
+    "acceptable": false,
+    "reason": "open_jev_policy_ranked",
+    "score": 0.004722570805069108,
+    "compared": 20
+  },
+  {
+    "id": "one_test_assertion",
+    "split": "holdout",
+    "selected": "gpt-6-luna/medium",
+    "workflow": "direct_execution",
+    "acceptable": true,
+    "reason": "open_jev_policy_ranked",
+    "score": 0.5761713128985766,
+    "compared": 20
+  },
+  {
+    "id": "csv_export",
+    "split": "holdout",
+    "selected": "gpt-6-sol/medium",
+    "workflow": "direct_execution",
+    "acceptable": true,
+    "reason": "open_jev_policy_ranked",
+    "score": 7.804568891795507e-08,
+    "compared": 20
+  },
+  {
+    "id": "autocomplete",
+    "split": "holdout",
+    "selected": "gpt-6-sol/medium",
+    "workflow": "direct_execution",
+    "acceptable": true,
+    "reason": "open_jev_policy_ranked",
+    "score": 2.0120316943557082e-08,
+    "compared": 20
+  },
+  {
+    "id": "token_leak",
+    "split": "holdout",
+    "selected": "gpt-6-sol/high",
+    "workflow": "direct_execution",
+    "acceptable": true,
+    "reason": "open_jev_policy_ranked",
+    "score": 0.0009755867901439747,
+    "compared": 20
+  },
+  {
+    "id": "build_refactor",
+    "split": "holdout",
+    "selected": "gpt-6-sol/high",
+    "workflow": "direct_execution",
+    "acceptable": true,
+    "reason": "open_jev_policy_ranked",
+    "score": 0.032087468970141544,
+    "compared": 20
+  },
+  {
+    "id": "schema_rollout",
+    "split": "holdout",
+    "selected": "gpt-6-sol/high",
+    "workflow": "direct_execution",
+    "acceptable": true,
+    "reason": "open_jev_policy_ranked",
+    "score": 0.0006251559236656299,
+    "compared": 20
+  },
+  {
+    "id": "cache_concurrency",
+    "split": "holdout",
+    "selected": "gpt-6-sol/high",
+    "workflow": "direct_execution",
+    "acceptable": true,
+    "reason": "open_jev_policy_ranked",
+    "score": 0.008032830997715137,
+    "compared": 20
+  }
+]
