@@ -132,8 +132,8 @@ codex debug models
 ~/.local/share/jev-router/bin/jev-auto auto-feedback ROUTE_KEY --rating mixed --note '기능은 맞지만 수정 범위가 큼'
 
 # 코드·화면 작업 전 저장소 관례 확인, 작업 후 변경 범위와 관례 검사
-~/.local/share/jev-router/bin/jev-auto quality-context '검색 조건 추가' --workspace /absolute/repo/path --focus-path 'src/main/java/example/search/'
-~/.local/share/jev-router/bin/jev-auto quality-check '검색 조건 추가' --workspace /absolute/repo/path --allowed-path 'src/main/' --allowed-path 'src/test/' --run-id ROUTED_RUN_ID
+~/.local/share/jev-router/bin/jev-auto quality-context '검색 조건 추가' --workspace /absolute/repo/path --focus-path 'src/main/java/example/search/' --save-baseline
+~/.local/share/jev-router/bin/jev-auto quality-check '검색 조건 추가' --workspace /absolute/repo/path --baseline-id BASELINE_ID --allowed-path 'src/main/' --allowed-path 'src/test/' --run-id ROUTED_RUN_ID
 # 모델 선택기 경로에서는 --run-id 대신 --route-key ROUTE_KEY 사용
 
 # 카탈로그 갱신 / 설정 복원
@@ -158,4 +158,4 @@ uv run jev-auto restore
 
 `doctor`는 설치 설정, 카탈로그 파일, 로컬 서비스, Codex CLI에서 `jev-auto`가 조회되는지를 확인한다. Desktop 선택기 표시와 실제 Desktop 턴의 백엔드 호출은 이 명령으로 증명할 수 없으므로 `unverified`로 표시한다.
 
-라우팅과 실행 연결에 더해 저장소 관례를 확인하는 품질 검사 명령을 제공한다. Jev Auto 스킬과 카탈로그 모델의 메인 지시는 코드·UI 작업 전에 `quality-context`, 작업 후에 `quality-check`를 호출하도록 안내한다. `--focus-path`로 대상 주변의 React 및 KMP/CMP Compose 화면 관례를 조사할 수 있다. 화면 작업에서는 기존 테마·컴포넌트·상태 처리와 시각적 위계를 먼저 정리하고, 변경 후 실제 렌더링과 해당 플랫폼의 화면 상태를 확인한다. 정적 검사에서 발견한 디자인 토큰·상태·성능 위험은 검토 신호이며, 실제 디자인 품질이나 성능 측정값이 아니다. JPA와 QueryDSL 사용 근거가 함께 발견된 저장소에서는 새 직접 JDBC 코드를 경고한다. 예외를 선택할 때는 `--allow-jdbc --jdbc-reason '구체적 사유'`가 필요하다. 계획한 경로 밖의 수정도 검토 대상으로 표시한다. `--run-id` 또는 `--route-key`로 해당 실행 기록에 검사 건수와 종류를 연결한다. 요청 문장과 소스 줄은 기록하지 않는다. 검사 출력의 diff는 현재 `HEAD` 대비 작업 트리 전체를 사용하므로, 작업 전에 이미 수정된 파일이 있다면 기존 변경과 새 변경을 사람이 구별해야 한다. 자세한 경계와 예시는 [실행 구조](docs/jev-auto-architecture.md)를 참고한다. 과거 MCP 시제품의 검증은 [1차 검증 기록](docs/phase1-verification.md)에 남겨 두었다.
+라우팅과 실행 연결에 더해 저장소 관례를 확인하는 품질 검사 명령을 제공한다. Jev Auto 스킬과 카탈로그 모델의 메인 지시는 코드·UI 작업 전에 `quality-context --save-baseline`, 작업 후에 `quality-check --baseline-id`를 호출하도록 안내한다. 기준선에는 작업 전 변경 파일 경로와 해시만 저장하며, 그대로인 사전 변경은 검사에서 제외한다. 사전 수정 파일을 다시 바꾸면 별도 수동 검토 대상으로 표시한다. `--focus-path`로 대상 주변의 React 및 KMP/CMP Compose 화면 관례를 조사할 수 있다. 화면 작업에서는 기존 테마·컴포넌트·상태 처리와 시각적 위계를 먼저 정리하고, 변경 후 실제 렌더링과 해당 플랫폼의 화면 상태를 확인한다. 정적 검사에서 발견한 디자인 토큰·상태·성능 위험은 검토 신호이며, 실제 디자인 품질이나 성능 측정값이 아니다. JPA와 QueryDSL 사용 근거가 함께 발견된 저장소에서는 새 직접 JDBC 코드를 경고한다. 예외를 선택할 때는 `--allow-jdbc --jdbc-reason '구체적 사유'`가 필요하다. 계획한 경로 밖의 수정도 검토 대상으로 표시한다. `--run-id` 또는 `--route-key`로 해당 실행 기록에 검사 건수와 종류를 연결한다. 요청 문장과 소스 줄은 기록하지 않는다. 자세한 경계와 예시는 [실행 구조](docs/jev-auto-architecture.md)를 참고한다. 과거 MCP 시제품의 검증은 [1차 검증 기록](docs/phase1-verification.md)에 남겨 두었다.

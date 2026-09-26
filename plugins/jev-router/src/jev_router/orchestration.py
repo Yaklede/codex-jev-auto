@@ -39,6 +39,14 @@ QUALITY_FLOW_POLICY = (
     "missing evidence. Jev's choice is advisory; the main agent verifies the actual result "
     "and must not complete with failed or missing required evidence. Keep tiny coupled edits local."
 )
+BASELINE_MARKER = "[Jev Auto quality baseline v1]"
+BASELINE_POLICY = (
+    "For repository edits, run quality-context with --save-baseline before editing and retain its "
+    "baseline_id. Pass --baseline-id to quality-check after editing so unchanged pre-task files "
+    "are excluded. If a pre-task edited file changes again, inspect it manually against the "
+    "baseline; HEAD diffs can include earlier changes. If HEAD changes, capture a fresh baseline "
+    "after reviewing the intervening commit. Do not treat missing baseline evidence as a clean review."
+)
 
 
 def apply(payload: dict[str, Any], decision: Decision, route_key: str | None = None) -> dict[str, Any]:
@@ -65,6 +73,7 @@ def apply(payload: dict[str, Any], decision: Decision, route_key: str | None = N
         f"\n{BEHAVIOR_MARKER}\n{BEHAVIOR_POLICY}"
         f"\n{REPLAN_MARKER}\n{REPLAN_POLICY}"
         f"\n{QUALITY_FLOW_MARKER}\n{QUALITY_FLOW_POLICY}"
+        f"\n{BASELINE_MARKER}\n{BASELINE_POLICY}"
     )
     if decision.candidate.requires_confirmation:
         instruction += (
@@ -101,6 +110,8 @@ def apply(payload: dict[str, Any], decision: Decision, route_key: str | None = N
                 additions.append(f"{REPLAN_MARKER}\n{REPLAN_POLICY}")
             if QUALITY_FLOW_MARKER not in existing:
                 additions.append(f"{QUALITY_FLOW_MARKER}\n{QUALITY_FLOW_POLICY}")
+            if BASELINE_MARKER not in existing:
+                additions.append(f"{BASELINE_MARKER}\n{BASELINE_POLICY}")
             if decision.candidate.requires_confirmation:
                 approval_marker = f"[Jev Auto Astra recommendation {route_key or 'current'}]"
                 if approval_marker not in existing:

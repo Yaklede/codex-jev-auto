@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 
 from jev_router import auto_cli
@@ -60,3 +61,29 @@ def test_intent_review_cli_passes_observed_evidence(tmp_path, monkeypatch, capsy
     assert result["decision"] == "evidence_missing"
     assert seen["contract"]["requirement"] == CONTRACT["requirement"]
     assert seen["evidence"]["tests"][0]["status"] == "passed"
+
+
+def test_quality_cli_baseline_ignores_unchanged_prior_file(tmp_path, monkeypatch, capsys):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    (repo / "README.md").write_text("original\n")
+    git("add", "README.md")
+    git("-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init")
+    (repo / "README.md").write_text("prior edit\n")
+    monkeypatch.setenv("JEV_ROUTER_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr(sys, "argv", ["jev-auto", "quality-context", "Review feature", "--workspace", str(repo),
+                                   "--save-baseline"])
+    auto_cli.main()
+    baseline_id = json.loads(capsys.readouterr().out)["baseline_id"]
+    (repo / "feature.py").write_text("value = 1\n")
+    monkeypatch.setattr(sys, "argv", ["jev-auto", "quality-check", "Review feature", "--workspace", str(repo),
+                                   "--allowed-path", "feature.py", "--baseline-id", baseline_id])
+    auto_cli.main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["changed_paths"] == ["feature.py"]
+    assert not any("outside the planned scope" in item["message"] for item in report["findings"])

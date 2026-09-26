@@ -15,6 +15,7 @@ import sys
 import time
 from urllib.error import URLError
 from urllib.request import urlopen
+from uuid import uuid4
 
 import tomlkit
 import uvicorn
@@ -23,7 +24,7 @@ from .auto_catalog import sync_catalog
 from .auto_proxy import create_app, data_directory
 from .auto_routing import AutoRouter
 from .doctor import diagnose
-from .quality import inspect_quality
+from .quality import capture_baseline, inspect_quality
 from .routing import ImplementationContract
 from .intent_review import review_intent_sync
 from . import auto_outcome, run_log
@@ -52,6 +53,24 @@ def _read_json_object(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"Expected a JSON object: {path}")
     return value
+
+
+def _baseline_path(baseline_id: str) -> Path:
+    if len(baseline_id) != 32 or any(character not in "0123456789abcdef" for character in baseline_id):
+        raise ValueError("Invalid quality baseline ID")
+    return data_directory() / "quality-baselines" / f"{baseline_id}.json"
+
+
+def _save_baseline(workspace: Path) -> tuple[str, int]:
+    baseline = capture_baseline(workspace)
+    baseline_id = uuid4().hex
+    path = _baseline_path(baseline_id)
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    path.parent.chmod(0o700)
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(baseline, stream)
+    return baseline_id, len(baseline["signatures"])
 
 
 def _service_alive(port: int) -> bool:
@@ -218,6 +237,7 @@ def main() -> None:
     context.add_argument("request")
     context.add_argument("--workspace", type=Path, required=True)
     context.add_argument("--focus-path", action="append", default=[], help="Likely affected file or directory; repeat as needed")
+    context.add_argument("--save-baseline", action="store_true", help="Record pre-task changed-path hashes for later scope review")
     review = sub.add_parser("quality-check", help="Review changed paths and repository conventions")
     review.add_argument("request")
     review.add_argument("--workspace", type=Path, required=True)
@@ -226,6 +246,7 @@ def main() -> None:
     review.add_argument("--jdbc-reason", help="Required explanation when --allow-jdbc is used")
     review.add_argument("--run-id", help="Attach redacted quality check counts to this routed run")
     review.add_argument("--route-key", help="Attach redacted quality check counts to a main Jev Auto route")
+    review.add_argument("--baseline-id", help="Review only changes after a saved quality-context baseline")
     intent = sub.add_parser("intent-review", help="Choose the next action from a task contract and observed evidence")
     intent.add_argument("--contract-file", type=Path, required=True)
     intent.add_argument("--evidence-file", type=Path, required=True)
@@ -262,7 +283,12 @@ def main() -> None:
         elif args.command == "auto-feedback":
             result = auto_outcome.feedback(data_directory(), args.route_key, args.rating, args.note)
         elif args.command == "quality-context":
+            if args.save_baseline:
+                baseline_id, count = _save_baseline(args.workspace)
             result = inspect_quality(args.workspace, request=args.request, focus_paths=args.focus_path)
+            if args.save_baseline:
+                result["baseline_id"] = baseline_id
+                result["preexisting_changed_paths"] = count
         elif args.command == "quality-check":
             if args.allow_jdbc and not (args.jdbc_reason and args.jdbc_reason.strip()):
                 raise ValueError("--allow-jdbc requires --jdbc-reason")
@@ -270,6 +296,7 @@ def main() -> None:
                 args.workspace, request=args.request, review=True,
                 allowed_paths=args.allowed_path, allow_jdbc=args.allow_jdbc,
                 jdbc_reason=args.jdbc_reason if args.allow_jdbc else None,
+                baseline=_read_json_object(_baseline_path(args.baseline_id)) if args.baseline_id else None,
             )
             if args.run_id:
                 result["recorded_quality"] = run_log.record_quality(data_directory(), args.run_id, result)

@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from jev_router.quality import inspect_quality
+from jev_router.quality import capture_baseline, inspect_quality
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -97,3 +97,67 @@ def test_quality_review_integrates_compose_visual_and_code_findings(tmp_path):
     assert any("Blocking call" in finding["message"] for finding in report["findings"])
     assert report["requires_review"] is True
     assert report["acceptance"]["visual"].startswith("Requires rendered-screen")
+
+
+def test_baseline_excludes_unchanged_prior_work_and_checks_new_changes(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "README.md").write_text("original\n")
+    (repo / "feature.py").write_text("value = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init")
+    (repo / "README.md").write_text("prior edit\n")
+    (repo / "prior-untracked.txt").write_text("prior\n")
+    baseline = capture_baseline(repo)
+    (repo / "feature.py").write_text("value = 2\n")
+    (repo / "unexpected.txt").write_text("new\n")
+
+    report = inspect_quality(repo, request="Edit feature", review=True,
+                             allowed_paths=["feature.py"], baseline=baseline)
+
+    assert report["changed_paths"] == ["feature.py", "unexpected.txt"]
+    assert report["preexisting_modified_paths"] == []
+    assert [finding["evidence"] for finding in report["findings"]] == ["unexpected.txt"]
+
+
+def test_baseline_flags_reedited_prior_file_for_manual_review(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "feature.py").write_text("value = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init")
+    (repo / "feature.py").write_text("value = 2\n")
+    baseline = capture_baseline(repo)
+    (repo / "feature.py").write_text("value = 3\n")
+
+    report = inspect_quality(repo, request="Edit feature", review=True,
+                             allowed_paths=["feature.py"], baseline=baseline)
+
+    assert report["changed_paths"] == ["feature.py"]
+    assert report["preexisting_modified_paths"] == ["feature.py"]
+    assert any("pre-task edits" in finding["message"] for finding in report["findings"])
+
+
+def test_baseline_detects_reversion_to_head_and_rejects_head_change(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    (repo / "feature.py").write_text("value = 1\n")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init")
+    (repo / "feature.py").write_text("value = 2\n")
+    baseline = capture_baseline(repo)
+    (repo / "feature.py").write_text("value = 1\n")
+    report = inspect_quality(repo, request="Restore feature", review=True,
+                             allowed_paths=["feature.py"], baseline=baseline)
+    assert report["changed_paths"] == ["feature.py"]
+    assert report["preexisting_modified_paths"] == ["feature.py"]
+
+    (repo / "extra.py").write_text("new = True\n")
+    _git(repo, "add", "extra.py")
+    _git(repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "next")
+    with pytest.raises(ValueError, match="HEAD changed"):
+        inspect_quality(repo, request="Restore feature", review=True,
+                        allowed_paths=["feature.py"], baseline=baseline)
