@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 
 import pytest
 
@@ -30,6 +31,13 @@ def test_astra_decision_uses_non_astra_main_model_and_records_both(tmp_path, mon
     assert len(entries) == 1
     assert entries[0]["model"] == "gpt-6-astra"
     assert entries[0]["coordinator_model"] == "gpt-6-sol"
+    assert entries[0]["score"] == 0.8
+    assert entries[0]["compared"] == 2
+    assert entries[0]["profile"]["scope"] == "broad"
+    assert entries[0]["telemetry_schema"] == 2
+    assert len(entries[0]["routing_source_sha256"]) == 64
+    assert len(entries[0]["guide_source_sha256"]) == 64
+    assert "Plan a difficult migration" not in json.dumps(entries[0])
 
 
 def test_astra_with_no_safe_main_model_fails_closed(tmp_path, monkeypatch):
@@ -143,6 +151,48 @@ def test_followup_context_stays_with_its_session(tmp_path, monkeypatch):
     asyncio.run(router.route(_payload("진행해", "second")))
     assert "Public UI change" in seen[-1]
     assert "Private backend migration" not in seen[-1]
+
+
+def test_followup_lineage_is_pseudonymous_and_new_task_is_not_labeled_correction(tmp_path, monkeypatch):
+    router = AutoRouter(tmp_path)
+
+    async def decide(request, **kwargs):
+        return Decision(Candidate("gpt-6-sol", "medium"), "test", None, 1,
+                        Profile("general", "focused", 0, (), False))
+
+    monkeypatch.setattr(router, "decide", decide)
+    first = asyncio.run(router.route(_payload("Implement private checkout flow", "private-session")))
+    second = asyncio.run(router.route(_payload("아직도 버튼이 네모야. 기존 디자인에 맞춰줘", "private-session")))
+    third = asyncio.run(router.route(_payload("Build a separate dashboard", "private-session")))
+    records = {item["route_key"]: item for item in map(json.loads, (tmp_path / "auto-decisions.jsonl").read_text().splitlines())}
+    assert records[second.route_key]["previous_route_key"] == first.route_key
+    assert records[second.route_key]["relationship"] == "possible_correction"
+    assert records[third.route_key]["previous_route_key"] == second.route_key
+    assert records[third.route_key]["relationship"] == "new_request"
+    assert records[first.route_key]["session_fingerprint"] == records[second.route_key]["session_fingerprint"]
+    assert "private-session" not in (tmp_path / "auto-decisions.jsonl").read_text()
+    assert "Implement private checkout flow" not in (tmp_path / "auto-decisions.jsonl").read_text()
+
+
+def test_session_lineage_survives_proxy_restart(tmp_path, monkeypatch):
+    async def decide(request, **kwargs):
+        return Decision(Candidate("gpt-6-sol", "medium"), "test", None, 1,
+                        Profile("general", "focused", 0, (), False))
+
+    first_router = AutoRouter(tmp_path)
+    monkeypatch.setattr(first_router, "decide", decide)
+    first = asyncio.run(first_router.route(_payload("Implement checkout flow", "session-a")))
+    path = tmp_path / "auto-decisions.jsonl"
+    old = json.loads(path.read_text())
+    old["time"] = time.time() - 30 * 86400
+    path.write_text(json.dumps(old) + "\n")
+    second_router = AutoRouter(tmp_path)
+    monkeypatch.setattr(second_router, "decide", decide)
+    second = asyncio.run(second_router.route(_payload("진행해", "session-a")))
+    records = [json.loads(line) for line in (tmp_path / "auto-decisions.jsonl").read_text().splitlines()]
+    assert records[-1]["route_key"] == second.route_key
+    assert records[-1]["previous_route_key"] == first.route_key
+    assert records[-1]["relationship"] == "explicit_followup"
 
 
 def test_repeated_failure_routes_to_sol_review_without_calling_astra(tmp_path, monkeypatch):

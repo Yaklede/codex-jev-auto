@@ -57,3 +57,19 @@ def test_compose_visual_review_is_retained_in_main_route_quality(tmp_path):
         "findings": [],
     })
     assert record["quality_review"]["visual_review_required"] is True
+
+
+def test_recent_exposes_lineage_and_guide_version_for_audit(tmp_path):
+    _decision(tmp_path)
+    path = tmp_path / "auto-decisions.jsonl"
+    item = json.loads(path.read_text())
+    item.update({"telemetry_schema": 2, "session_fingerprint": "b" * 24,
+                 "previous_route_key": "c" * 24, "relationship": "possible_correction",
+                 "score": 0.62, "compared": 4, "guide_source_sha256": "d" * 64})
+    path.write_text(json.dumps(item) + "\n")
+    record = auto_outcome.recent(tmp_path)[0]
+    assert record["session_fingerprint"] == "b" * 24
+    assert record["previous_route_key"] == "c" * 24
+    assert record["relationship"] == "possible_correction"
+    assert record["score"] == 0.62
+    assert record["guide_source_sha256"] == "d" * 64

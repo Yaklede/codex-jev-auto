@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import hashlib
 import json
 import os
@@ -20,6 +20,9 @@ from .routing import Candidate, Decision, ImplementationContract, Profile, _elig
 
 
 VIRTUAL_MODEL = "jev-auto"
+TELEMETRY_SCHEMA = 2
+ROUTING_SOURCE_SHA256 = hashlib.sha256(Path(__file__).with_name("routing.py").read_bytes()).hexdigest()
+GUIDE_SOURCE_SHA256 = hashlib.sha256(Path(__file__).with_name("orchestration.py").read_bytes()).hexdigest()
 
 
 class CoordinatorUnavailable(RuntimeError):
@@ -56,6 +59,15 @@ def _is_followup(request: str) -> bool:
     ))
 
 
+def _relationship(request: str) -> str:
+    """A routing hint, not a quality label or proof that the prior task failed."""
+    if _is_followup(request):
+        return "explicit_followup"
+    if re.search(r"^\s*(?:아니(?:요|야|면)?\b|그게\s*아니라|아직(?:도)?|여전히|다시\b|still\b|not\s+fixed\b)", request.lower()):
+        return "possible_correction"
+    return "new_request"
+
+
 def _routing_request(request: str, previous: str) -> str:
     if not _is_followup(request) or not previous or previous == request:
         return request
@@ -87,6 +99,23 @@ class AutoRouter:
         self._sessions: dict[tuple[str, str], tuple[str, str]] = {}
         self._candidates: tuple[float, list[Candidate]] | None = None
         self._lock = asyncio.Lock()
+
+    def _last_session_route(self, fingerprint: str | None, current_key: str) -> str | None:
+        """Recover lineage for a long-lived session without retaining user text."""
+        if not fingerprint:
+            return None
+        path = self.data_directory / "auto-decisions.jsonl"
+        if not path.is_file():
+            return None
+        for line in reversed(path.read_text(encoding="utf-8").splitlines()):
+            try:
+                item = json.loads(line)
+            except ValueError:
+                continue
+            if (isinstance(item, dict) and item.get("session_fingerprint") == fingerprint
+                    and isinstance(item.get("route_key"), str) and item["route_key"] != current_key):
+                return item["route_key"]
+        return None
 
     async def candidates(self) -> list[Candidate]:
         now = time.monotonic()
@@ -140,6 +169,8 @@ class AutoRouter:
         session_id = payload.get("prompt_cache_key")
         # A cache key is useful only when the client supplies a stable identity.
         session = (allowed_key, session_id) if isinstance(session_id, str) and session_id else None
+        session_fingerprint = (hashlib.sha256(f"{allowed_key}\0{session_id}".encode("utf-8")).hexdigest()[:24]
+                               if session else None)
         async with self._lock:
             previous = self._sessions.get(session) if session else None
             if previous:
@@ -168,6 +199,9 @@ class AutoRouter:
                 decision = cached[1]
                 coordinator = cached[2]
             else:
+                previous_route_key = (previous[1] if previous and request and previous[1] != route_key
+                                      else self._last_session_route(session_fingerprint, route_key) if request else None)
+                relationship = _relationship(request) if previous_route_key else "unlinked"
                 decision = await self.decide(scoring_request, allowed_models=allowed_models,
                                              review_replan=review_replan)
                 if decision.candidate.requires_confirmation:
@@ -190,7 +224,8 @@ class AutoRouter:
                         key: value for key, value in self._sessions.items()
                         if value[1] in self._routes
                     }
-                self._record(route_key, decision, coordinator)
+                self._record(route_key, decision, coordinator, session_fingerprint,
+                             previous_route_key, relationship)
             if session and request:
                 self._sessions[session] = (request, route_key)
         concrete = dict(payload)
@@ -200,7 +235,10 @@ class AutoRouter:
         concrete["reasoning"] = reasoning
         return RoutedRequest(concrete, decision, route_key)
 
-    def _record(self, route_key: str, decision: Decision, coordinator: Candidate) -> None:
+    def _record(
+        self, route_key: str, decision: Decision, coordinator: Candidate,
+        session_fingerprint: str | None, previous_route_key: str | None, relationship: str,
+    ) -> None:
         self.data_directory.mkdir(parents=True, exist_ok=True)
         record = {
             "time": time.time(),
@@ -212,6 +250,15 @@ class AutoRouter:
             "reason": decision.reason,
             "policy_band": decision.policy_band,
             "astra_confirmation_required": decision.candidate.requires_confirmation,
+            "telemetry_schema": TELEMETRY_SCHEMA,
+            "session_fingerprint": session_fingerprint,
+            "previous_route_key": previous_route_key,
+            "relationship": relationship,
+            "score": decision.score,
+            "compared": decision.compared,
+            "profile": asdict(decision.profile),
+            "routing_source_sha256": ROUTING_SOURCE_SHA256,
+            "guide_source_sha256": GUIDE_SOURCE_SHA256,
         }
         with (self.data_directory / "auto-decisions.jsonl").open("a", encoding="utf-8") as log:
             log.write(json.dumps(record, ensure_ascii=False) + "\n")
