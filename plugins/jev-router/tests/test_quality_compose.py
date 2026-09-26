@@ -101,3 +101,34 @@ def test_focused_ui_directory_informs_prework_without_diff_review(tmp_path):
     assert result["guidance"]
     assert result["review_required"] is False
     assert result["visual_review_checklist"] == []
+
+
+def test_rounded_shared_button_and_square_direct_button_need_review(tmp_path):
+    app = tmp_path / "shared/src/commonMain/kotlin/app"
+    components = app / "components"
+    components.mkdir(parents=True)
+    (components / "AppButton.kt").write_text(
+        "@Composable fun AppButton() { Button(shape = RoundedCornerShape(12.dp)) {} }"
+    )
+    name = "shared/src/commonMain/kotlin/app/ProfileScreen.kt"
+    result = inspect_compose(tmp_path, _diff(name,
+        "@Composable fun ProfileScreen() { Button(shape = RectangleShape) { Text(\"Save\") } }"
+    ))
+
+    assert any("AppButton.kt" in item and "rounded button" in item for item in result["evidence"])
+    assert any("Direct square Button shape" in item["message"] for item in result["findings"])
+    assert any("button shapes" in item.lower() for item in result["visual_review_checklist"])
+
+
+def test_unrelated_shape_or_no_shared_baseline_does_not_flag_button(tmp_path):
+    app = tmp_path / "shared/src/commonMain/kotlin/app"
+    components = app / "components"
+    components.mkdir(parents=True)
+    (components / "Card.kt").write_text(
+        "@Composable fun Card() { Box(Modifier.clip(RoundedCornerShape(12.dp))) }"
+    )
+    name = "shared/src/commonMain/kotlin/app/ProfileScreen.kt"
+    result = inspect_compose(tmp_path, _diff(name,
+        "@Composable fun ProfileScreen() { Button(shape = RectangleShape) {} }"
+    ))
+    assert not any("square Button" in item["message"] for item in result["findings"])

@@ -26,6 +26,19 @@ REPLAN_POLICY = (
     "If the available evidence or constraints cannot support the requested result, report that "
     "limit instead of promising success or repeatedly tuning against the same data."
 )
+QUALITY_FLOW_MARKER = "[Jev Auto staged quality flow v1]"
+QUALITY_FLOW_POLICY = (
+    "When Sol has resolved behavior and design decisions, write a short implementation contract "
+    "with requirement, 1-4 allowed_paths, acceptance_checks, existing_patterns, "
+    "decisions_resolved, risk, and ui_baseline for UI. Route that bounded implementation "
+    "with jev-auto route '<subtask>' --workspace '<repo>' --contract-file '<json>' before "
+    "delegating; Luna medium is eligible only for low-risk, fully specified work. "
+    "After implementation, collect observed tests, acceptance results, quality-check output, "
+    "and rendered-screen review for UI. Run jev-auto intent-review --contract-file '<json>' "
+    "--evidence-file '<json>' to choose completion candidate, local fix, Sol review, or "
+    "missing evidence. Jev's choice is advisory; the main agent verifies the actual result "
+    "and must not complete with failed or missing required evidence. Keep tiny coupled edits local."
+)
 
 
 def apply(payload: dict[str, Any], decision: Decision, route_key: str | None = None) -> dict[str, Any]:
@@ -51,6 +64,7 @@ def apply(payload: dict[str, Any], decision: Decision, route_key: str | None = N
         "Astra plans only, then Sol implements. Follow higher-priority instructions."
         f"\n{BEHAVIOR_MARKER}\n{BEHAVIOR_POLICY}"
         f"\n{REPLAN_MARKER}\n{REPLAN_POLICY}"
+        f"\n{QUALITY_FLOW_MARKER}\n{QUALITY_FLOW_POLICY}"
     )
     if decision.candidate.requires_confirmation:
         instruction += (
@@ -85,6 +99,8 @@ def apply(payload: dict[str, Any], decision: Decision, route_key: str | None = N
                 additions.append(f"{BEHAVIOR_MARKER}\n{BEHAVIOR_POLICY}")
             if REPLAN_MARKER not in existing:
                 additions.append(f"{REPLAN_MARKER}\n{REPLAN_POLICY}")
+            if QUALITY_FLOW_MARKER not in existing:
+                additions.append(f"{QUALITY_FLOW_MARKER}\n{QUALITY_FLOW_POLICY}")
             if decision.candidate.requires_confirmation:
                 approval_marker = f"[Jev Auto Astra recommendation {route_key or 'current'}]"
                 if approval_marker not in existing:

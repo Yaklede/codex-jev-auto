@@ -46,6 +46,16 @@ _STATE_HINTS = {
 }
 _LIST_RENDER = re.compile(r"\.map\s*\(")
 _LARGE_MEDIA = re.compile(r"<(?:Image|img|video)\b|\b(?:resizeMode|object-fit)\b")
+_BUTTON_SHAPE = re.compile(r"\b(?:borderRadius|border-radius)\s*[:=]\s*['\"]?(0|\d+(?:\.\d+)?(?:px|rem)?)\b|\brounded-(?:none|full)\b", re.I)
+_DIRECT_BUTTON = re.compile(r"<(?:button|Pressable|TouchableOpacity)\b", re.I)
+
+
+def _button_shape(source: str) -> str | None:
+    match = _BUTTON_SHAPE.search(source)
+    if not match:
+        return None
+    value = match.group(0).lower()
+    return "square" if match.group(1) == "0" or "rounded-none" in value else "rounded"
 
 
 def _is_ui_path(name: str, lines: list[tuple[int, str]]) -> bool:
@@ -239,6 +249,8 @@ def inspect_frontend(workspace: Path, diff_text: str, focus_paths: list[str] | N
 
     component_dirs: set[str] = set()
     token_examples: list[str] = []
+    button_examples: list[tuple[str, str]] = []
+    shape_token_examples: list[str] = []
     sibling_screens: list[str] = []
     nearby_states: set[str] = set()
     changed_set = set(changed_paths)
@@ -254,6 +266,13 @@ def inspect_frontend(workspace: Path, diff_text: str, focus_paths: list[str] | N
         source = _read_small(path, 16_000)
         if _TOKEN_PATTERN.search(source) and len(token_examples) < 3:
             token_examples.append(relative)
+        if ("button" in path.stem.lower() and "components" in path.parts
+                and (shape := _button_shape(source)) and len(button_examples) < 3):
+            button_examples.append((relative, shape))
+        if (("theme" in path.parts or "tokens" in path.parts)
+                and re.search(r"\b(?:radius|borderRadius|border-radius)\b", source, re.I)
+                and len(shape_token_examples) < 3):
+            shape_token_examples.append(relative)
         for state, pattern in _STATE_HINTS.items():
             if pattern.search(source):
                 nearby_states.add(state)
@@ -261,6 +280,10 @@ def inspect_frontend(workspace: Path, diff_text: str, focus_paths: list[str] | N
         evidence.append("Nearby component convention: " + ", ".join(sorted(component_dirs)[:3]))
     if token_examples:
         evidence.append("Existing token/theme usage: " + ", ".join(token_examples))
+    if button_examples:
+        evidence.append("Nearby reusable button shapes: " + ", ".join(f"{name} ({shape})" for name, shape in button_examples))
+    if shape_token_examples:
+        evidence.append("Nearby shape/radius tokens: " + ", ".join(shape_token_examples))
     design_systems = sorted({label for dep, label in _DESIGN_DEPS.items() if dep in dependencies})
     if design_systems:
         evidence.append("Installed UI library: " + ", ".join(design_systems[:3]))
@@ -276,6 +299,10 @@ def inspect_frontend(workspace: Path, diff_text: str, focus_paths: list[str] | N
         guidance.append("Follow nearby component boundaries and naming for new UI pieces.")
     if token_examples:
         guidance.append("Reuse the existing design tokens or theme variables for new style values.")
+    if button_examples:
+        guidance.append("Inspect the nearby reusable button and its shape before adding a directly styled control.")
+    if shape_token_examples:
+        guidance.append("Inspect nearby shape/radius tokens when styling new controls.")
     if design_systems:
         guidance.append("Use the installed UI library's existing components and theme before adding custom controls.")
     if sibling_screens:
@@ -291,6 +318,14 @@ def inspect_frontend(workspace: Path, diff_text: str, focus_paths: list[str] | N
     for name in ui_files:
         suffix = Path(name).suffix.lower()
         for number, source in safe_changes[name]:
+            direct_shape = _button_shape(source) if _DIRECT_BUTTON.search(source) else None
+            if direct_shape and button_examples and all(shape != direct_shape for _, shape in button_examples):
+                baseline, baseline_shape = button_examples[0]
+                findings.append({
+                    "severity": "review",
+                    "message": f"Direct button shape ({direct_shape}) differs from a nearby reusable button ({baseline_shape}); inspect the rendered controls.",
+                    "evidence": f"{name}:{number}: {source.strip()[:100]} | nearby: {baseline}",
+                })
             if token_examples and _STYLE_LITERAL.search(source) and (
                 (suffix in {".css", ".scss"} and _CSS_DECLARATION.search(source))
                 or (suffix in {".jsx", ".tsx"} and re.search(r"\bstyle\s*=\s*\{\{", source))
@@ -316,6 +351,7 @@ def inspect_frontend(workspace: Path, diff_text: str, focus_paths: list[str] | N
             "Inspect default, loading, empty, error, and success states where applicable.",
             "Check text overflow, touch targets, keyboard focus, and screen-reader labels.",
             "Compare spacing, typography, and colors with nearby screens and existing tokens.",
+            "Compare button shapes and control styling with nearby reusable components in the rendered screen.",
         ]
         if framework in {"React Native", "Expo / React Native"}:
             checklist[0] = f"Open changed screen/component ({targets}) on small and large devices, including platform differences."

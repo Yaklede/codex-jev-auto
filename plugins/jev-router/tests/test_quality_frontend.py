@@ -142,3 +142,39 @@ def test_focused_screen_directory_samples_immediate_ui_files_for_prework(tmp_pat
     assert all("Hidden.tsx" not in item for item in result["evidence"])
     assert any("theme" in item.lower() or "token" in item.lower() for item in result["guidance"])
     assert any("small and large devices" in item for item in result["visual_review_checklist"])
+
+
+def test_rounded_shared_button_and_square_direct_button_need_review(tmp_path):
+    components = tmp_path / "src" / "components"
+    components.mkdir(parents=True)
+    (components / "AppButton.tsx").write_text(
+        "export const AppButton = () => <button style={{borderRadius: 12}} />"
+    )
+    screen = tmp_path / "src" / "screens"
+    screen.mkdir()
+    (screen / "Profile.tsx").write_text("export const Profile = () => <main />")
+    result = inspect_frontend(tmp_path, _diff(
+        "src/screens/Profile.tsx",
+        "export const Profile = () => <button style={{borderRadius: 0}}>Save</button>",
+    ))
+
+    assert any("AppButton.tsx (rounded)" in item for item in result["evidence"])
+    assert any("Direct button shape (square)" in item["message"] for item in result["findings"])
+    assert any("button shapes" in item.lower() for item in result["visual_review_checklist"])
+
+
+def test_unrelated_radius_or_matching_shared_button_does_not_flag_shape(tmp_path):
+    components = tmp_path / "src" / "components"
+    components.mkdir(parents=True)
+    (components / "Card.tsx").write_text("export const Card = () => <div style={{borderRadius: 12}} />")
+    screen = tmp_path / "src" / "screens"
+    screen.mkdir()
+    added = "export const Profile = () => <button style={{borderRadius: 0}}>Save</button>"
+    result = inspect_frontend(tmp_path, _diff("src/screens/Profile.tsx", added))
+    assert result["findings"] == []
+
+    (components / "AppButton.tsx").write_text(
+        "export const AppButton = () => <button style={{borderRadius: 0}} />"
+    )
+    result = inspect_frontend(tmp_path, _diff("src/screens/Profile.tsx", added))
+    assert not any("button shape" in finding["message"].lower() for finding in result["findings"])

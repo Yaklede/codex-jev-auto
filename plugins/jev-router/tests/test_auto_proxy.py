@@ -345,6 +345,7 @@ def test_orchestration_upgrades_old_policy_in_existing_task_once():
     assert "user-visible behavior" in updated["instructions"]
     assert "Error-code changes alone are not recovery" in updated["instructions"]
     assert updated["instructions"].count(orchestration.BEHAVIOR_MARKER) == 1
+    assert updated["instructions"].count(orchestration.QUALITY_FLOW_MARKER) == 1
     assert orchestration.apply(updated, decision) == updated
 
 

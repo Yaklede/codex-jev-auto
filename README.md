@@ -56,6 +56,48 @@ flowchart TD
 
 같은 목표에 대한 반복 실패 신호가 있으면 Sol high가 먼저 이전 접근과 검증 근거를 검토한다. 새로운 계획이 도움이 될 때만 Astra 계획 검토를 제안하고 사용자 승인을 요청한다. 부정적인 실험 결과 하나로 Astra를 추천하거나 목표 달성을 약속하지 않는다. 프록시가 이전 대화를 받지 못한 턴에서는 메인 에이전트의 대화 검토가 이 판단을 보완한다.
 
+## 단계별 구현과 의도 검토
+
+메인은 코드 수정 전에 요청의 완료 조건과 저장소 관례를 짧은 작업 계약으로 정리한다. 분석에 Sol이 필요했더라도 구현 판단이 모두 끝났고 수정 범위가 작고 위험이 낮으면, 계약을 첨부한 후속 `route`에서 Luna medium을 후보에 넣는다. 명확하다는 문장만으로 난도를 내리지 않는다. 보안·동시성·마이그레이션 등은 이 경로에서 제외하며, 아주 작은 결합된 수정은 메인이 직접 처리할 수 있다.
+
+```mermaid
+flowchart TD
+    A[요청과 저장소 관례 확인] --> B[완료 조건·허용 경로·기존 패턴 고정]
+    B --> C{구현 판단과 위험}
+    C -->|미해결 또는 높음| S[Sol 구현·검토]
+    C -->|확정·낮음| R[계약을 첨부해 하위 작업 재라우팅]
+    R --> L[Luna medium 또는 Sol medium 구현]
+    L --> V[테스트·범위 검사·실제 화면 확인]
+    S --> V
+    V --> J[Open Jev: 증거에 따른 다음 행동 점수화]
+    J -->|완료 후보| M[메인이 의도 충족 확인]
+    J -->|국소 수정| L
+    J -->|설계 재검토| S
+    J -->|증거 부족| V
+```
+
+계약은 임시 JSON 파일로 전달한다. `ui_baseline`에는 실제로 확인한 기존 컴포넌트나 화면 경로를 넣는다. 일반 코드 작업에는 생략할 수 있다.
+
+```json
+{
+  "requirement": "회원 저장 버튼이 기존 화면과 같은 형태로 동작한다",
+  "allowed_paths": ["src/member/MemberForm.tsx"],
+  "acceptance_checks": ["submit_works", "button_matches_existing"],
+  "existing_patterns": ["기존 PrimaryButton을 재사용"],
+  "decisions_resolved": true,
+  "risk": "low",
+  "ui_baseline": ["src/components/PrimaryButton.tsx"]
+}
+```
+
+```sh
+jev-auto route '회원 폼 버튼 구현' --workspace /absolute/repo/path --contract-file /tmp/jev-contract.json
+jev-auto quality-check '회원 폼 버튼 구현' --workspace /absolute/repo/path --allowed-path 'src/member/MemberForm.tsx'
+jev-auto intent-review --contract-file /tmp/jev-contract.json --evidence-file /tmp/jev-evidence.json
+```
+
+마지막 명령의 증거 JSON에는 `acceptance_results`(계약의 검사 ID와 `passed|failed|missing`), `tests`(실행한 검사명과 상태), `quality`(`quality-check`의 전체 JSON 출력)를 넣는다. UI가 바뀌었다면 `visual_review`에 상태와 함께 `baseline_ref`(비교한 기존 화면·컴포넌트), `rendered_ref`(실제 렌더링 결과), `comparison_notes`(형태·간격·상태 비교 결과)를 적는다. 검토 결과는 `complete_candidate`, `luna_fix`, `sol_review`, `evidence_missing` 중 하나다. 실패·누락된 필수 증거나 해결하지 않은 검사 항목이 있으면 완료 후보가 될 수 없다. Open Jev의 선택은 다음 행동에 대한 조언이며, 메인이 실제 diff와 화면을 보고 최종 완료 여부를 판단한다. 정적 검사는 버튼의 시각적 일관성을 완전히 증명하지 못한다.
+
 ## 설치
 
 Python 3.11+, `uv`, Codex 로그인이 필요하다. Open Jev 점수화를 쓰려면 로컬 Open Jev와 Gemma 3 4B 가중치를 준비한다. 기존 설치 기본 경로는 `~/.local/share/jev-router/open-jev`이고 Open Jev 주소는 `http://127.0.0.1:8000`이다. 준비되지 않으면 정책에 따른 비 Astra 기본 설정을 사용한다.

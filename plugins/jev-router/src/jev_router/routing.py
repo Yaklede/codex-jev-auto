@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import asdict, dataclass
 import math
 from pathlib import Path
+from pathlib import PurePosixPath
 import re
 import subprocess
 from typing import Any
@@ -45,6 +46,50 @@ class Profile:
     file_count: int
     languages: tuple[str, ...]
     existing_changes: bool
+
+
+@dataclass(frozen=True)
+class ImplementationContract:
+    """A reviewed, bounded implementation brief supplied by the coordinator."""
+
+    requirement: str
+    allowed_paths: tuple[str, ...]
+    acceptance_checks: tuple[str, ...]
+    existing_patterns: tuple[str, ...]
+    decisions_resolved: bool
+    risk: str
+    ui_baseline: tuple[str, ...] = ()
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ImplementationContract:
+        if not isinstance(payload, dict):
+            raise ValueError("Implementation contract must be a JSON object")
+        required = {
+            "requirement", "allowed_paths", "acceptance_checks", "existing_patterns",
+            "decisions_resolved", "risk",
+        }
+        if missing := required - payload.keys():
+            raise ValueError(f"Implementation contract is missing: {', '.join(sorted(missing))}")
+        if unknown := payload.keys() - required - {"ui_baseline"}:
+            raise ValueError(f"Unknown implementation contract fields: {', '.join(sorted(unknown))}")
+        if not isinstance(payload["requirement"], str) or not payload["requirement"].strip():
+            raise ValueError("Implementation requirement must be nonempty text")
+        if not isinstance(payload["decisions_resolved"], bool):
+            raise ValueError("decisions_resolved must be a boolean")
+        if payload["risk"] not in ("low", "medium", "high"):
+            raise ValueError("risk must be low, medium, or high")
+
+        def strings(name: str) -> tuple[str, ...]:
+            value = payload.get(name, [])
+            if not isinstance(value, list) or any(not isinstance(item, str) or not item.strip() for item in value):
+                raise ValueError(f"{name} must be a list of nonempty strings")
+            return tuple(item.strip() for item in value)
+
+        return cls(
+            payload["requirement"].strip(), strings("allowed_paths"),
+            strings("acceptance_checks"), strings("existing_patterns"),
+            payload["decisions_resolved"], payload["risk"], strings("ui_baseline"),
+        )
 
 
 @dataclass(frozen=True)
@@ -153,6 +198,38 @@ def _policy_band(request: str, profile: Profile) -> str:
     return "unclassified"
 
 
+def _bounded_implementation(contract: ImplementationContract, request: str, profile: Profile) -> bool:
+    """A contract can lower implementation effort only after deterministic safety checks."""
+    if not contract.decisions_resolved or contract.risk != "low":
+        return False
+    if not contract.requirement.strip() or not contract.existing_patterns or not contract.acceptance_checks:
+        return False
+    if not 1 <= len(contract.allowed_paths) <= 4 or len(set(contract.allowed_paths)) != len(contract.allowed_paths):
+        return False
+    for path in contract.allowed_paths:
+        parsed = PurePosixPath(path)
+        if (not path or path.startswith(("/", "~")) or "\\" in path
+                or any(part in ("", ".", "..") for part in path.split("/"))
+                or any(char in path for char in "*?[]") or parsed.is_absolute()):
+            return False
+    if profile.kind in ("frontend", "mixed") and not contract.ui_baseline:
+        return False
+    critical = (
+        "security", "authorization", "authentication", "permission", "privilege",
+        "concurren", "race condition", "migration", "schema change", "payment",
+        "settlement", "payout", "rollback", "transaction boundary", "encryption",
+        "보안", "인증", "인가", "권한", "동시성", "경쟁 조건", "마이그레이션",
+        "스키마 변경", "결제", "정산", "송금", "롤백", "트랜잭션 경계", "암호화",
+    )
+    content = " ".join((
+        request, contract.requirement, *contract.existing_patterns,
+        *contract.acceptance_checks, *contract.ui_baseline,
+    )).lower()
+    if any(term in content for term in critical):
+        return False
+    return True
+
+
 def _eligible(candidate: Candidate, band: str) -> bool:
     model, effort = candidate.model, candidate.effort
     if band == "explicit_astra":
@@ -161,6 +238,8 @@ def _eligible(candidate: Candidate, band: str) -> bool:
         return model in ("gpt-6-luna", "gpt-5.6-terra") and effort in ("low", "medium")
     if band == "standard":
         return (model == "gpt-5.6-terra" and effort in ("medium", "high")) or (model == "gpt-6-sol" and effort == "medium")
+    if band == "bounded_implementation":
+        return model in ("gpt-6-luna", "gpt-6-sol") and effort == "medium"
     if band == "complex":
         return model == "gpt-6-sol" and effort in ("medium", "high", "xhigh", "max")
     if band == "replan_review":
@@ -269,13 +348,18 @@ async def choose(
     request: str, profile: Profile, candidates: list[Candidate], jev_url: str,
     client: httpx.AsyncClient | None = None,
     policy_band: str | None = None,
+    implementation_contract: ImplementationContract | None = None,
 ) -> Decision:
     if not candidates:
         raise RuntimeError("No requested model and reasoning pair is available")
+    band = policy_band or _policy_band(request, profile)
+    if (policy_band is None and implementation_contract is not None
+            and band in ("small", "standard", "unclassified")
+            and _bounded_implementation(implementation_contract, request, profile)):
+        band = "bounded_implementation"
     if len(candidates) == 1:
         return Decision(candidates[0], "only_available_pair", None, 1, profile,
-                        policy_band or _policy_band(request, profile))
-    band = policy_band or _policy_band(request, profile)
+                        band)
     own_client = client is None
     if own_client:
         client = httpx.AsyncClient(timeout=60)
@@ -294,16 +378,28 @@ async def choose(
             return Decision(candidates[preferred], "explicit_astra_request", None, len(candidates), profile, band)
         if not eligible:
             return Decision(fallback(candidates), "policy_no_candidate_fallback", None, len(candidates), profile, band)
-        options = [_option(candidate) for candidate in candidates]
+        scoring_indices = eligible if band == "bounded_implementation" else list(range(len(candidates)))
+        options = [_option(candidates[index]) for index in scoring_indices]
         context = _context(request, profile)
+        if band == "bounded_implementation" and implementation_contract is not None:
+            context += (
+                "\nThe coordinator has resolved design and behavior decisions for a bounded, low-risk "
+                "implementation subtask. Choose the least costly model capable of this specific brief.\n"
+                f"Requirement: {implementation_contract.requirement[:1000]}\n"
+                f"Allowed paths: {', '.join(implementation_contract.allowed_paths)}\n"
+                f"Existing patterns: {'; '.join(implementation_contract.existing_patterns)[:1000]}\n"
+                f"Acceptance checks: {'; '.join(implementation_contract.acceptance_checks)[:1000]}\n"
+            )
         first = await _score(client, jev_url, context, options)
         reversed_scores = await _score(client, jev_url, context, list(reversed(options)))
         second = list(reversed(reversed_scores))
-        first_choice = max(eligible, key=lambda index: first[index][0])
-        second_choice = max(eligible, key=lambda index: second[index][0])
+        indexed_scores = [(score_index, index) for score_index, index in enumerate(scoring_indices) if index in eligible]
+        first_choice = max(indexed_scores, key=lambda pair: first[pair[0]][0])[1]
+        second_choice = max(indexed_scores, key=lambda pair: second[pair[0]][0])[1]
         if first_choice != second_choice:
             return Decision(_policy_fallback([candidates[index] for index in eligible]), "jev_order_disagreement_fallback", None, len(candidates), profile, band)
-        return Decision(candidates[first_choice], "open_jev_policy_ranked", first[first_choice][1], len(candidates), profile, band)
+        score_index = scoring_indices.index(first_choice)
+        return Decision(candidates[first_choice], "open_jev_policy_ranked", first[score_index][1], len(candidates), profile, band)
     except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError, asyncio.TimeoutError):
         return Decision(_policy_fallback([candidates[index] for index in eligible]), "jev_unavailable_or_invalid_fallback", None, len(candidates), profile, band)
     finally:

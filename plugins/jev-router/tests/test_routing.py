@@ -3,7 +3,12 @@ from types import SimpleNamespace
 
 import httpx
 
-from jev_router.routing import Candidate, Profile, _eligible, _policy_band, available_candidates, choose
+import pytest
+
+from jev_router.routing import (
+    Candidate, ImplementationContract, Profile, _eligible, _policy_band,
+    available_candidates, choose,
+)
 
 
 def _catalog_model(name, efforts, hidden=False):
@@ -142,3 +147,116 @@ def test_jev_network_failure_uses_non_astra_fallback():
     decision = asyncio.run(run())
     assert decision.candidate == Candidate("gpt-6-sol", "medium")
     assert decision.reason == "jev_unavailable_or_invalid_fallback"
+
+
+def _implementation_contract(**changes):
+    payload = {
+        "requirement": "Use the existing button component for the settings screen action",
+        "allowed_paths": ["src/screens/Settings.tsx"],
+        "acceptance_checks": ["Button matches the adjacent screen and click changes the setting"],
+        "existing_patterns": ["Reuse the shared Button component and theme tokens"],
+        "decisions_resolved": True,
+        "risk": "low",
+        "ui_baseline": ["src/screens/Profile.tsx"],
+    }
+    payload.update(changes)
+    return ImplementationContract.from_dict(payload)
+
+
+def test_explicit_bounded_contract_lets_jev_choose_luna_medium():
+    candidates = [
+        Candidate("gpt-6-astra", "medium"), Candidate("gpt-6-luna", "medium"),
+        Candidate("gpt-5.6-terra", "medium"), Candidate("gpt-6-sol", "medium"),
+    ]
+    profile = Profile("frontend", "focused", 250, ("React",), False)
+
+    def handle(request):
+        data = __import__("json").loads(request.content)
+        options = data["options"]
+        assert len(options) == 2
+        assert all("gpt-6-luna" in option or "gpt-6-sol" in option for option in options)
+        assert "Settings.tsx" in data["context"]
+        winner = next(i for i, item in enumerate(options) if "gpt-6-luna" in item)
+        return httpx.Response(200, json={
+            "best_index": winner,
+            "options": [
+                {"option": option, "score": 2.0 if i == winner else 1.0, "probability": 0.8 if i == winner else 0.2}
+                for i, option in enumerate(options)
+            ],
+        })
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await choose("Implement the settings action", profile, candidates,
+                                "http://localhost", client,
+                                implementation_contract=_implementation_contract())
+
+    decision = asyncio.run(run())
+    assert decision.candidate == Candidate("gpt-6-luna", "medium")
+    assert decision.policy_band == "bounded_implementation"
+
+
+@pytest.mark.parametrize("changes", [
+    {"decisions_resolved": False}, {"risk": "medium"}, {"allowed_paths": []},
+    {"allowed_paths": ["../Settings.tsx"]},
+    {"allowed_paths": ["src/*.tsx"]},
+    {"allowed_paths": ["a.tsx", "b.tsx", "c.tsx", "d.tsx", "e.tsx"]},
+    {"acceptance_checks": []}, {"existing_patterns": []}, {"ui_baseline": []},
+])
+def test_incomplete_or_unbounded_contract_does_not_open_luna_path(changes):
+    profile = Profile("frontend", "focused", 250, ("React",), False)
+    candidates = [Candidate("gpt-6-luna", "medium"), Candidate("gpt-6-sol", "medium")]
+    decision = asyncio.run(choose(
+        "Implement the settings action", profile, candidates, "http://offline",
+        implementation_contract=_implementation_contract(**changes),
+    ))
+    assert decision.policy_band != "bounded_implementation"
+    assert decision.candidate == Candidate("gpt-6-sol", "medium")
+
+
+def test_security_and_migration_stay_out_of_bounded_implementation():
+    profile = Profile("backend", "focused", 250, ("Python",), False)
+    candidates = [Candidate("gpt-6-luna", "medium"), Candidate("gpt-6-sol", "medium")]
+    for request in ("Fix authorization bypass in one handler", "Implement the database migration"):
+        decision = asyncio.run(choose(
+            request, profile, candidates, "http://offline",
+            implementation_contract=_implementation_contract(ui_baseline=[]),
+        ))
+        assert decision.policy_band != "bounded_implementation"
+        assert decision.candidate == Candidate("gpt-6-sol", "medium")
+
+
+def test_broad_task_cannot_be_downgraded_by_narrow_sounding_contract():
+    profile = Profile("backend", "broad", 250, ("Python",), False)
+    candidates = [Candidate("gpt-6-luna", "medium"), Candidate("gpt-6-sol", "medium")]
+    decision = asyncio.run(choose(
+        "Redesign the entire service architecture", profile, candidates, "http://offline",
+        implementation_contract=_implementation_contract(ui_baseline=[]),
+    ))
+    assert decision.policy_band == "complex"
+    assert decision.candidate == Candidate("gpt-6-sol", "medium")
+
+
+def test_contract_cannot_override_explicit_astra_or_review_policy():
+    profile = Profile("frontend", "focused", 250, ("React",), False)
+    candidates = [Candidate("gpt-6-luna", "medium"), Candidate("gpt-6-sol", "high"),
+                  Candidate("gpt-6-astra", "medium")]
+    contract = _implementation_contract()
+    astra = asyncio.run(choose("Use GPT-6 Astra for this task", profile, candidates,
+                               "http://offline", implementation_contract=contract))
+    review = asyncio.run(choose("Review repeated failed fixes", profile, candidates,
+                                "http://offline", policy_band="replan_review",
+                                implementation_contract=contract))
+    assert astra.candidate.requires_confirmation
+    assert astra.policy_band == "explicit_astra"
+    assert review.candidate == Candidate("gpt-6-sol", "high")
+    assert review.policy_band == "replan_review"
+
+
+def test_contract_schema_rejects_missing_unknown_and_wrong_types():
+    for changes in ({"risk": "unknown"}, {"allowed_paths": "src/main.tsx"},
+                    {"decisions_resolved": "true"}, {"extra": "ignored"}):
+        with pytest.raises(ValueError):
+            _implementation_contract(**changes)
+    with pytest.raises(ValueError):
+        ImplementationContract.from_dict({"requirement": "just a prompt"})

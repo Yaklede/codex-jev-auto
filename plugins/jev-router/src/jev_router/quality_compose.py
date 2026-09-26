@@ -20,6 +20,9 @@ _DIMEN = re.compile(r"\b(?:padding|size|width|height|defaultMinSize|offset|space
 _BLOCKING = re.compile(r"\b(?:Thread\.sleep|runBlocking)\s*\(")
 _ANDROID_IMPORT = re.compile(r"^\s*import\s+(?:android\.|androidx\.activity\.|androidx\.fragment\.|androidx\.lifecycle\.)")
 _SCREEN = re.compile(r"(?:Screen|Page|Route|View)\.kt$|/(?:screens?|pages?|routes?|ui)/", re.I)
+_ROUNDED_SHAPE = re.compile(r"\bRoundedCornerShape\s*\(\s*(?!0(?:\.0+)?\.dp\b)[^)]+\)")
+_SQUARE_SHAPE = re.compile(r"\b(?:RectangleShape\b|RoundedCornerShape\s*\(\s*0(?:\.0+)?\.dp\s*\))")
+_BUTTON_CALL = re.compile(r"\bButton\s*\(")
 
 
 def _safe(workspace: Path, name: str) -> Path | None:
@@ -189,10 +192,25 @@ def inspect_compose(workspace: Path, diff_text: str, focus_paths: list[str] | No
         path.relative_to(workspace).as_posix() for path, source in sample_sources
         if source and "@Composable" in source and any(p.lower() in {"components", "designsystem"} for p in path.parts)
     ][:3]
+    button_examples = [
+        path.relative_to(workspace).as_posix() for path, source in sample_sources
+        if source and path not in paths and "button" in path.stem.lower()
+        and any(part.lower() in {"components", "designsystem"} for part in path.parts)
+        and _ROUNDED_SHAPE.search(source)
+    ][:3]
+    shape_token_examples = [
+        path.relative_to(workspace).as_posix() for path, source in sample_sources
+        if source and any(part.lower() in {"theme", "tokens"} for part in path.parts)
+        and re.search(r"\b(?:shapes|RoundedCornerShape|CornerSize)\b", source)
+    ][:3]
     if token_examples:
         evidence.append("Existing theme/token usage: " + ", ".join(token_examples))
     if component_examples:
         evidence.append("Nearby composable components: " + ", ".join(component_examples))
+    if button_examples:
+        evidence.append("Nearby reusable rounded button: " + ", ".join(button_examples))
+    if shape_token_examples:
+        evidence.append("Nearby shape tokens: " + ", ".join(shape_token_examples))
     multiplatform = bool(ui_source_sets & {"commonMain", "iosMain", "desktopMain"} or configured_sets & {"iosMain", "desktopMain"})
     framework = "Compose Multiplatform" if ui_files and multiplatform else ("Jetpack Compose" if ui_files else None)
     guidance: list[str] = []
@@ -202,6 +220,10 @@ def inspect_compose(workspace: Path, diff_text: str, focus_paths: list[str] | No
             guidance.append("Reuse existing theme and design tokens for new colors and spacing where equivalent tokens exist.")
         if component_examples:
             guidance.append("Check nearby reusable components before introducing a new control or styling variant.")
+        if button_examples:
+            guidance.append("Inspect the nearby rounded button before adding a directly shaped Button.")
+        if shape_token_examples:
+            guidance.append("Inspect nearby theme shapes before setting a control shape directly.")
         if framework == "Compose Multiplatform":
             guidance.append("Keep shared UI portable across configured targets and validate platform-specific layout and behavior.")
     findings: list[dict[str, str]] = []
@@ -210,6 +232,12 @@ def inspect_compose(workspace: Path, diff_text: str, focus_paths: list[str] | No
             stripped = line.strip()
             if stripped.startswith("//") or stripped.startswith("*"):
                 continue
+            if button_examples and _BUTTON_CALL.search(line) and _SQUARE_SHAPE.search(line):
+                findings.append({
+                    "severity": "review",
+                    "message": "Direct square Button shape differs from a nearby reusable rounded button; inspect the rendered controls.",
+                    "evidence": f"{name}:{number}: {stripped[:100]} | nearby: {button_examples[0]}",
+                })
             message: str | None = None
             if "commonMain" in Path(name).parts and _ANDROID_IMPORT.search(line):
                 message = "Android-only import in commonMain may break other targets."
@@ -228,6 +256,7 @@ def inspect_compose(workspace: Path, diff_text: str, focus_paths: list[str] | No
             "Inspect default, loading, empty, error, and success states where applicable.",
             "Check small and large layouts, text scaling, long text, accessibility labels, focus, and touch targets.",
             "Exercise interaction and scrolling; use runtime profiling for suspected jank or recomposition issues.",
+            "Compare button shapes and control styling with nearby reusable composables in the rendered screen.",
         ]
         if framework == "Compose Multiplatform":
             if "iosMain" in configured_sets or "iosMain" in source_sets or "commonMain" in ui_source_sets:

@@ -24,6 +24,8 @@ from .auto_proxy import create_app, data_directory
 from .auto_routing import AutoRouter
 from .doctor import diagnose
 from .quality import inspect_quality
+from .routing import ImplementationContract
+from .intent_review import review_intent_sync
 from . import auto_outcome, run_log
 
 
@@ -41,6 +43,15 @@ def _plist_path() -> Path:
 
 def _base_url(port: int) -> str:
     return f"http://127.0.0.1:{port}/v1"
+
+
+def _read_json_object(path: Path) -> dict:
+    if path.stat().st_size > 128_000:
+        raise ValueError(f"JSON input is too large: {path}")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"Expected a JSON object: {path}")
+    return value
 
 
 def _service_alive(port: int) -> bool:
@@ -180,6 +191,7 @@ def main() -> None:
     route = sub.add_parser("route", help="Score a subagent task before spawning")
     route.add_argument("request")
     route.add_argument("--workspace", type=Path)
+    route.add_argument("--contract-file", type=Path, help="Validated implementation contract JSON for post-plan routing")
     finish = sub.add_parser("finish", help="Record a routed task's verified outcome")
     finish.add_argument("run_id")
     finish.add_argument("--status", choices=("completed", "failed", "interrupted"), required=True)
@@ -214,6 +226,10 @@ def main() -> None:
     review.add_argument("--jdbc-reason", help="Required explanation when --allow-jdbc is used")
     review.add_argument("--run-id", help="Attach redacted quality check counts to this routed run")
     review.add_argument("--route-key", help="Attach redacted quality check counts to a main Jev Auto route")
+    intent = sub.add_parser("intent-review", help="Choose the next action from a task contract and observed evidence")
+    intent.add_argument("--contract-file", type=Path, required=True)
+    intent.add_argument("--evidence-file", type=Path, required=True)
+    intent.add_argument("--jev-url", default=os.environ.get("OPENJEV_URL", "http://127.0.0.1:8000"))
     args = parser.parse_args()
     if args.command == "serve":
         uvicorn.run(create_app(), host="127.0.0.1", port=args.port, access_log=False, log_level="warning")
@@ -230,7 +246,9 @@ def main() -> None:
         elif args.command == "route":
             directory = data_directory()
             directory.mkdir(parents=True, exist_ok=True)
-            decision = asyncio.run(AutoRouter(directory).decide(args.request, args.workspace))
+            contract = ImplementationContract.from_dict(_read_json_object(args.contract_file)) if args.contract_file else None
+            decision = asyncio.run(AutoRouter(directory).decide(args.request, args.workspace,
+                                                               implementation_contract=contract))
             result = decision.to_dict()
             result["run_id"] = run_log.start(directory, decision, args.workspace)["run_id"]
         elif args.command == "finish":
@@ -257,6 +275,10 @@ def main() -> None:
                 result["recorded_quality"] = run_log.record_quality(data_directory(), args.run_id, result)
             if args.route_key:
                 result["recorded_auto_quality"] = auto_outcome.quality(data_directory(), args.route_key, result)["quality_review"]
+        elif args.command == "intent-review":
+            contract = _read_json_object(args.contract_file)
+            evidence = _read_json_object(args.evidence_file)
+            result = review_intent_sync(contract, evidence, jev_url=args.jev_url)
         else:
             if not 1 <= args.limit <= 100:
                 raise ValueError("--limit must be between 1 and 100")

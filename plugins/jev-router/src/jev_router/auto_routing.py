@@ -16,7 +16,7 @@ from uuid import uuid4
 from .codex_runner import list_candidates
 from .openjev_service import ensure_openjev
 from .replanning import needs_replan_review
-from .routing import Candidate, Decision, Profile, _eligible, _policy_band, choose, fallback, inspect_repo
+from .routing import Candidate, Decision, ImplementationContract, Profile, _eligible, _policy_band, choose, fallback, inspect_repo
 
 
 VIRTUAL_MODEL = "jev-auto"
@@ -104,6 +104,7 @@ class AutoRouter:
     async def decide(
         self, request: str, workspace: Path | None = None,
         allowed_models: set[str] | None = None, review_replan: bool = False,
+        implementation_contract: ImplementationContract | None = None,
     ) -> Decision:
         candidates = await self.candidates()
         if allowed_models is not None:
@@ -129,7 +130,8 @@ class AutoRouter:
                 return Decision(candidate, "replan_review_open_jev_unavailable", None, len(candidates), profile, "replan_review")
             return Decision(fallback(candidates), "open_jev_not_ready_fallback", None, len(candidates), profile)
         return await choose(request, profile, candidates, self.jev_url,
-                            policy_band="replan_review" if review_replan else None)
+                            policy_band="replan_review" if review_replan else None,
+                            implementation_contract=implementation_contract)
 
     async def route(self, payload: dict[str, Any], allowed_models: set[str] | None = None) -> RoutedRequest:
         user_texts = _user_texts(payload)
