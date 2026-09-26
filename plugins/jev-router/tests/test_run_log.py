@@ -50,6 +50,33 @@ def test_parallel_finish_cannot_overwrite_first_outcome(tmp_path):
     assert run_log.recent(tmp_path)[0]["outcome"]["checks"] in (["first"], ["second"])
 
 
+def test_quality_review_keeps_counts_without_source_or_request(tmp_path):
+    workspace = tmp_path / "repo"
+    workspace.mkdir()
+    decision = Decision(Candidate("gpt-6-sol", "medium"), "test", None, 1, Profile("backend", "focused", 0, (), False))
+    run_id = run_log.start(tmp_path / "data", decision, workspace)["run_id"]
+    report = {
+        "workspace": str(workspace.resolve()),
+        "request": "private requirement",
+        "changed_paths": ["src/Secret.java"],
+        "backend": {"status": "jpa_querydsl"},
+        "frontend": {"review_required": False},
+        "compose": {"review_required": True},
+        "findings": [{"severity": "warning", "message": "Changed path is outside the planned scope", "evidence": "password=secret"}],
+    }
+    recorded = run_log.record_quality(tmp_path / "data", run_id, report)
+    assert recorded["finding_counts"] == {"warning": 1}
+    assert recorded["out_of_scope_files"] == 1
+    assert recorded["compose_visual_review_required"] is True
+    assert recorded["visual_review_required"] is True
+    content = (tmp_path / "data" / "runs" / f"{run_id}.json").read_text()
+    assert "private requirement" not in content
+    assert "password=secret" not in content
+    run_log.finish(tmp_path / "data", run_id, "completed", [])
+    with pytest.raises(ValueError, match="before finishing"):
+        run_log.record_quality(tmp_path / "data", run_id, report)
+
+
 def _finish_or_error(directory, run_id, check):
     try:
         return run_log.finish(directory, run_id, "completed", [check])["outcome"]["status"]

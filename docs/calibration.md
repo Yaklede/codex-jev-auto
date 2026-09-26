@@ -8,7 +8,7 @@ Open Jev의 기본 Gemma 점수만으로 20개 조합을 고르면 간단한 수
 
 ## 재현 가능한 평가
 
-사례와 임시 허용 범위는 [`evals/router_cases.json`](../evals/router_cases.json)에 있다. `development`는 정책을 조정하는 데 사용했다. 초기 `holdout`의 일부도 결과를 보고 규칙을 고쳤으므로 더 이상 독립 검증 자료가 아니다. 이후 새로 만든 [`router_holdout_v2.json`](../evals/router_holdout_v2.json)은 현재 정책을 바꾸지 않고 한 번만 실행했다. 결과는 [`baseline.json`](../evals/baseline.json), [`calibrated-v5.json`](../evals/calibrated-v5.json), [`holdout-v2-result.json`](../evals/holdout-v2-result.json)에 있다.
+사례와 임시 허용 범위는 [`evals/router_cases.json`](../evals/router_cases.json)에 있다. `development`는 정책을 조정하는 데 사용했다. 초기 `holdout`의 일부도 결과를 보고 규칙을 고쳤으므로 더 이상 독립 검증 자료가 아니다. 이후 만든 [`router_holdout_v2.json`](../evals/router_holdout_v2.json)은 처음에는 정책 변경 없이 한 번만 실행해 7/8을 얻었지만, 2026-09-25에 발견된 단일 설정 변경 과대 배정을 이번 정책 변경에 사용했다. 따라서 이제 v2 역시 **독립 검증 자료가 아닌 회귀 사례**다. 과거 결과는 [`baseline.json`](../evals/baseline.json), [`calibrated-v5.json`](../evals/calibrated-v5.json), [`holdout-v2-result.json`](../evals/holdout-v2-result.json)에 보존한다.
 
 | 단계 | 개발용 사례 | 별도 검증 사례 | 의미 |
 | --- | ---: | ---: | --- |
@@ -16,6 +16,7 @@ Open Jev의 기본 Gemma 점수만으로 20개 조합을 고르면 간단한 수
 | PMI + 난도 범위 | 9/9 | 2/4 | 쉬운 일과 위험한 일을 구분하지만, 일부 보통 난도 작업의 추론 강도가 낮음 |
 | Astra 계획 경로와 국소 수정 분류 | 12/12 | 기존 6/6 | 작은 일은 Luna/medium, 매우 어려운 일은 승인 대기형 Astra 계획 |
 | 현재 정책의 새 보류 사례 | — | 7/8 | 한 설정 상수 수정에 Terra/high가 선택되는 과대 배정 발견 |
+| 단일 파일 설정 변경 보정 후 v2 회귀 재실행 | — | 8/8 | 실패했던 한 사례가 Luna/low로 바뀜. 독립 검증 수치는 아님 |
 
 이 수치는 **사람이 임시로 정한 모델 범위와의 일치율**이다. 코드 품질, 성공률, 실제 비용 절감률이 아니다. 개발용 사례에 맞춘 정책이므로 12/12를 일반화하면 안 된다. 새 보류 사례의 과대 배정도 실제 사용자 작업에서 얼마나 비용을 낭비하는지 확인해야 한다.
 
@@ -35,4 +36,4 @@ uv run python ../../scripts/evaluate_router.py --cases ../../evals/router_holdou
 4. 매우 어려운 작업 한두 건은 사용자가 Astra **계획 실행을 직접 승인한 뒤**, `Sol 단독`과 `Astra 계획 + Sol 구현`을 비교한다. 계획의 정확성, 구현 품질, 총 사용량을 모두 확인한다.
 5. 정책을 고칠 때마다 새로운 보류 사례를 추가한다. 기존 보류 사례를 보고 고친 뒤에는 그 사례를 더 이상 독립 검증으로 계산하지 않는다.
 
-현재의 4개 보류 사례만으로 품질 보정을 완료했다고 볼 수 없다. 실제 작업의 결과와 사용자 선호가 들어와야 모델별 경계와 Astra 계획의 이득을 확정할 수 있다.
+실제 메인 턴의 선택은 `auto-decisions.jsonl`, 확인 가능한 응답 사용량은 `auto-usage.jsonl`에 route key로 기록한다. 완료 검사는 `auto-outcome`, 명시적 사용자 평가는 `auto-feedback`으로 연결할 수 있다. 누락된 사용량을 0으로 채우지 않는다. 이 연결만으로 재작업 횟수나 품질을 자동 판정하지는 않는다. 실제 작업의 결과와 사용자 선호가 들어와야 모델별 경계와 Astra 계획의 이득을 확정할 수 있다.

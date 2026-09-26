@@ -80,6 +80,14 @@ def test_workload_bounds_keep_small_work_cheap_and_complex_work_capable():
     assert not _eligible(Candidate("gpt-6-luna", "high"), frontier)
 
 
+def test_one_file_setting_change_is_small_but_cross_service_change_is_not():
+    profile = Profile("backend", "focused", 200, ("Python",), False)
+    one_file = "Change the default retry count from 3 to 4 in one configuration file, leaving behavior elsewhere unchanged."
+    spread = "Change one configuration setting across multiple services with migration tests."
+    assert _policy_band(one_file, profile) == "small"
+    assert _policy_band(spread, profile) != "small"
+
+
 def test_explicit_astra_waits_for_confirmation_even_without_scorer():
     candidates = [Candidate("gpt-6-sol", "medium"), Candidate("gpt-6-astra", "medium")]
     profile = Profile("mixed", "broad", 2000, (), True)
@@ -95,6 +103,29 @@ def test_extreme_work_recommends_astra_planning_and_negation_does_not_force_it()
     assert _eligible(Candidate("gpt-6-astra", "medium"), "frontier_plan")
     assert not _eligible(Candidate("gpt-6-sol", "high"), "frontier_plan")
     assert _policy_band("Do not use GPT-6 Astra for this task", profile) != "explicit_astra"
+
+
+def test_replan_review_keeps_astra_out_of_automatic_model_choice():
+    candidates = [Candidate("gpt-6-astra", "high"), Candidate("gpt-6-sol", "high")]
+    profile = Profile("backend", "broad", 300, ("Python",), True)
+
+    def handle(request):
+        options = __import__("json").loads(request.content)["options"]
+        scores = [10.0 if "gpt-6-astra" in option else 1.0 for option in options]
+        return httpx.Response(200, json={
+            "best_index": scores.index(max(scores)),
+            "options": [{"option": option, "score": score, "probability": 0.9}
+                        for option, score in zip(options, scores)],
+        })
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handle)) as client:
+            return await choose("Repeated failed fixes need review", profile, candidates,
+                                "http://localhost", client, policy_band="replan_review")
+
+    decision = asyncio.run(run())
+    assert decision.candidate == Candidate("gpt-6-sol", "high")
+    assert decision.policy_band == "replan_review"
 
 
 def test_jev_network_failure_uses_non_astra_fallback():

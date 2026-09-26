@@ -9,6 +9,8 @@ from urllib.parse import urlsplit
 import gzip
 import asyncio
 import re
+from collections import deque
+from uuid import uuid4
 
 import httpx
 import zstandard
@@ -22,6 +24,7 @@ from starlette.routing import Route, WebSocketRoute
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from .auto_routing import AutoRouter, CoordinatorUnavailable, VIRTUAL_MODEL, latest_user_text
+from .auto_telemetry import SSEOutcomeParser, outcome_from_event, record_usage
 from .orchestration import apply as apply_orchestration
 
 
@@ -72,7 +75,38 @@ async def _close(upstream: httpx.Response, client: httpx.AsyncClient) -> None:
     await client.aclose()
 
 
+def _record_route(route_key: str, status: str, usage: dict | None = None) -> None:
+    try:
+        record_usage(data_directory(), route_key, status, usage)
+    except OSError:
+        # Observability must never break the Responses stream.
+        pass
+
+
+async def _observed_stream(upstream: httpx.Response, route_key: str):
+    parser = SSEOutcomeParser() if upstream.headers.get("content-encoding", "identity").lower() == "identity" else None
+    status = "unverified" if 200 <= upstream.status_code < 300 else "failed"
+    try:
+        async for chunk in upstream.aiter_raw():
+            if parser is not None:
+                parser.feed(chunk)
+            yield chunk
+    except asyncio.CancelledError:
+        status = "cancelled"
+        raise
+    except GeneratorExit:
+        status = "cancelled"
+        raise
+    except Exception:
+        status = "failed"
+        raise
+    finally:
+        outcome = parser.outcome if parser is not None else None
+        _record_route(route_key, *(outcome if status == "unverified" and outcome is not None else (status, None)))
+
+
 async def responses(request: Request) -> Response:
+    routed = None
     try:
         body = await request.body()
         encoding = request.headers.get("content-encoding", "identity").lower()
@@ -102,7 +136,7 @@ async def responses(request: Request) -> Response:
                 }},
                 status_code=409,
             )
-        payload = apply_orchestration(routed.payload, routed.decision)
+        payload = apply_orchestration(routed.payload, routed.decision, route_key=routed.route_key)
     try:
         upstream_base = _base(_upstream(request))
     except ValueError as exc:
@@ -117,10 +151,12 @@ async def responses(request: Request) -> Response:
         upstream = await client.send(upstream_request, stream=True)
     except httpx.HTTPError as exc:
         await client.aclose()
+        if routed is not None:
+            _record_route(routed.route_key, "failed")
         return JSONResponse({"error": {"code": "upstream_unavailable", "message": type(exc).__name__}}, status_code=502)
     result_headers = {name: value for name, value in upstream.headers.items() if name.lower() in _RETURN_HEADERS}
     return StreamingResponse(
-        upstream.aiter_raw(), status_code=upstream.status_code,
+        _observed_stream(upstream, routed.route_key) if routed is not None else upstream.aiter_raw(), status_code=upstream.status_code,
         headers=result_headers, background=BackgroundTask(_close, upstream, client),
     )
 
@@ -141,6 +177,8 @@ async def websocket_responses(websocket: WebSocket) -> None:
         ) as upstream:
             await websocket.accept()
             last_user_text = ""
+            connection_route_id = "ws:" + uuid4().hex
+            pending_routes: deque[str | None] = deque()
 
             async def client_to_upstream() -> None:
                 nonlocal last_user_text
@@ -164,6 +202,8 @@ async def websocket_responses(websocket: WebSocket) -> None:
                                 if observed:
                                     last_user_text = observed
                             response = frame.get("response") if isinstance(frame.get("response"), dict) else frame
+                            if isinstance(response.get("model"), str) and response.get("model") != VIRTUAL_MODEL and response.get("generate") is not False:
+                                pending_routes.append(None)
                             if response.get("model") == VIRTUAL_MODEL:
                                 if not response.get("input") and response.get("generate") is False:
                                     # Codex opens a WebSocket session before sending the real user turn.
@@ -172,9 +212,13 @@ async def websocket_responses(websocket: WebSocket) -> None:
                                     continue
                                 route_input = response
                                 synthetic_input = not latest_user_text(response) and bool(last_user_text)
-                                if synthetic_input:
+                                synthetic_session = not response.get("prompt_cache_key")
+                                if synthetic_input or synthetic_session:
                                     route_input = dict(response)
+                                if synthetic_input:
                                     route_input["input"] = [{"role": "user", "content": [{"type": "input_text", "text": last_user_text}]}]
+                                if synthetic_session:
+                                    route_input["prompt_cache_key"] = connection_route_id
                                 try:
                                     routed = await websocket.app.state.router.route(route_input, _allowed_models(websocket.headers.get("user-agent")))
                                 except CoordinatorUnavailable:
@@ -183,7 +227,7 @@ async def websocket_responses(websocket: WebSocket) -> None:
                                 if routed.payload["model"] == "gpt-6-astra":
                                     await websocket.close(code=1008, reason="Astra planning needs user confirmation")
                                     return
-                                routed_payload = apply_orchestration(routed.payload, routed.decision)
+                                routed_payload = apply_orchestration(routed.payload, routed.decision, route_key=routed.route_key)
                                 if synthetic_input:
                                     # The synthetic user text is only for routing. Preserve
                                     # any real tool output already present in this frame.
@@ -191,16 +235,29 @@ async def websocket_responses(websocket: WebSocket) -> None:
                                         routed_payload["input"] = response["input"]
                                     else:
                                         routed_payload.pop("input", None)
+                                if synthetic_session:
+                                    routed_payload.pop("prompt_cache_key", None)
                                 if response is frame:
                                     frame = routed_payload
                                 else:
                                     frame["response"] = routed_payload
                                 serialized = json.dumps(frame, ensure_ascii=False, separators=(",", ":"))
                                 message = serialized.encode("utf-8") if binary else serialized
+                                pending_routes.append(routed.route_key)
                     await upstream.send(message)
 
             async def upstream_to_client() -> None:
                 async for message in upstream:
+                    if pending_routes and len(message) <= 256 * 1024:
+                        try:
+                            event = json.loads(message)
+                        except (ValueError, TypeError, UnicodeDecodeError):
+                            event = None
+                        outcome = outcome_from_event(event)
+                        if outcome is not None:
+                            route_key = pending_routes.popleft()
+                            if route_key is not None:
+                                _record_route(route_key, *outcome)
                     if isinstance(message, str):
                         await websocket.send_text(message)
                     else:
@@ -211,6 +268,10 @@ async def websocket_responses(websocket: WebSocket) -> None:
             for task in pending:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            while pending_routes:
+                route_key = pending_routes.popleft()
+                if route_key is not None:
+                    _record_route(route_key, "cancelled")
             for task in done:
                 if task.cancelled():
                     continue

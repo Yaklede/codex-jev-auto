@@ -54,6 +54,8 @@ flowchart TD
 
 **Jev Auto 모델만 선택해도 메인 작업이 필요에 따라 서브에이전트를 위임하도록 지시**한다. 프록시는 작업 분류 결과만 전달할 수 있으며, 서브에이전트를 실제로 열지 여부는 메인 모델과 Codex 협업 도구가 결정한다. Astra가 추천되면 메인 턴은 비 Astra 모델로 실행된다. Astra 서브에이전트의 승인 확인과 계획 전용 역할은 현재 메인에 전달된 지시로 관리하며, 도구 호출 자체를 프록시가 기술적으로 차단하지는 못한다. 승인 전 Astra를 메인 모델로 보내지는 않는다. 실제 Desktop 자동 위임과 승인 흐름은 아직 검증되지 않았다.
 
+같은 목표에 대한 반복 실패 신호가 있으면 Sol high가 먼저 이전 접근과 검증 근거를 검토한다. 새로운 계획이 도움이 될 때만 Astra 계획 검토를 제안하고 사용자 승인을 요청한다. 부정적인 실험 결과 하나로 Astra를 추천하거나 목표 달성을 약속하지 않는다. 프록시가 이전 대화를 받지 못한 턴에서는 메인 에이전트의 대화 검토가 이 판단을 보완한다.
+
 ## 설치
 
 Python 3.11+, `uv`, Codex 로그인이 필요하다. Open Jev 점수화를 쓰려면 로컬 Open Jev와 Gemma 3 4B 가중치를 준비한다. 기존 설치 기본 경로는 `~/.local/share/jev-router/open-jev`이고 Open Jev 주소는 `http://127.0.0.1:8000`이다. 준비되지 않으면 정책에 따른 비 Astra 기본 설정을 사용한다.
@@ -82,6 +84,16 @@ codex debug models
 ~/.local/share/jev-router/bin/jev-auto feedback RUN_ID --rating mixed --note '동작하지만 코드가 복잡함'
 ~/.local/share/jev-router/bin/jev-auto runs --limit 10
 
+# 모델 선택기의 Jev Auto 메인 턴: 선택·사용량 조회와 작업 결과 연결
+~/.local/share/jev-router/bin/jev-auto auto-runs --limit 10
+~/.local/share/jev-router/bin/jev-auto auto-outcome ROUTE_KEY --status completed --check '테스트 통과' --revisions 1
+~/.local/share/jev-router/bin/jev-auto auto-feedback ROUTE_KEY --rating mixed --note '기능은 맞지만 수정 범위가 큼'
+
+# 코드·화면 작업 전 저장소 관례 확인, 작업 후 변경 범위와 관례 검사
+~/.local/share/jev-router/bin/jev-auto quality-context '검색 조건 추가' --workspace /absolute/repo/path --focus-path 'src/main/java/example/search/'
+~/.local/share/jev-router/bin/jev-auto quality-check '검색 조건 추가' --workspace /absolute/repo/path --allowed-path 'src/main/' --allowed-path 'src/test/' --run-id ROUTED_RUN_ID
+# 모델 선택기 경로에서는 --run-id 대신 --route-key ROUTE_KEY 사용
+
 # 카탈로그 갱신 / 설정 복원
 uv run jev-auto sync-catalog
 uv run jev-auto restore
@@ -100,8 +112,8 @@ uv run jev-auto restore
 
 ## 동작과 범위
 
-프록시는 `127.0.0.1:18084`에서 Responses HTTP/WebSocket 요청을 받아, `jev-auto`일 때만 모델·추론 강도를 바꾼다. 기존 Codex 로그인 헤더를 상위 서버로 전달한다. 요청 본문과 인증 토큰은 라우팅 로그에 저장하지 않는다. 선택 결과는 `~/.local/share/jev-router/auto-decisions.jsonl`에 추천 모델·메인 실행 모델·강도·정책 근거로 남는다. 서브에이전트별 CLI `route`는 실행 ID를 반환하며, 그 ID를 기준으로 `~/.local/share/jev-router/runs/`에 실제 실행한 모델·에이전트 ID·작업 전후 Git 상태·검사·선택적 사용자 평가를 이어 저장한다. 프록시가 라우팅한 메인 턴에는 아직 실행 결과가 연결되지 않는다. Git 상태와 사용자 평가만으로 변경 품질을 단정하지 않는다. Open Jev 점수는 상대적인 옵션 순위이며 실제 성공률이 아니다.
+프록시는 `127.0.0.1:18084`에서 Responses HTTP/WebSocket 요청을 받아, `jev-auto`일 때만 모델·추론 강도를 바꾼다. 기존 Codex 로그인 헤더를 상위 서버로 전달한다. 요청 본문과 인증 토큰은 라우팅 로그에 저장하지 않는다. 선택 결과는 `auto-decisions.jsonl`, 메인 턴의 완료 상태와 확인 가능한 토큰 사용량은 `auto-usage.jsonl`에 route key로 남는다. `auto-outcome`과 `auto-feedback`으로 검사 결과·수정 횟수·명시적 사용자 평가를 같은 key에 연결할 수 있다. 사용량이 응답에 없으면 0으로 채우지 않고 미상으로 표시한다. 서브에이전트별 CLI `route`는 별도 실행 ID를 반환하며, `runs/`에 실제 실행 모델·에이전트 ID·작업 전후 Git 상태·검사·선택적 사용자 평가를 저장한다. 품질 판단은 여전히 테스트·diff·화면 확인이 필요하고 Open Jev 점수는 성공률이 아니다.
 
 `doctor`는 설치 설정, 카탈로그 파일, 로컬 서비스, Codex CLI에서 `jev-auto`가 조회되는지를 확인한다. Desktop 선택기 표시와 실제 Desktop 턴의 백엔드 호출은 이 명령으로 증명할 수 없으므로 `unverified`로 표시한다.
 
-1차 범위는 라우팅과 실행 연결이다. 쉬운 백엔드 작업은 단순하게, 어려운 작업에는 필요한 구조를 충분히 적용하는 코드 품질 루프와 정돈된 프론트엔드 코드·더 나은 화면 디자인 평가 루프는 [개발 계획](docs/plan.md)의 다음 단계다. 과거 MCP 시제품의 검증은 [1차 검증 기록](docs/phase1-verification.md)에 남겨 두었다.
+라우팅과 실행 연결에 더해 저장소 관례를 확인하는 품질 검사 명령을 제공한다. Jev Auto 스킬과 카탈로그 모델의 메인 지시는 코드·UI 작업 전에 `quality-context`, 작업 후에 `quality-check`를 호출하도록 안내한다. `--focus-path`로 대상 주변의 React 및 KMP/CMP Compose 화면 관례를 조사할 수 있다. 화면 작업에서는 기존 테마·컴포넌트·상태 처리와 시각적 위계를 먼저 정리하고, 변경 후 실제 렌더링과 해당 플랫폼의 화면 상태를 확인한다. 정적 검사에서 발견한 디자인 토큰·상태·성능 위험은 검토 신호이며, 실제 디자인 품질이나 성능 측정값이 아니다. JPA와 QueryDSL 사용 근거가 함께 발견된 저장소에서는 새 직접 JDBC 코드를 경고한다. 예외를 선택할 때는 `--allow-jdbc --jdbc-reason '구체적 사유'`가 필요하다. 계획한 경로 밖의 수정도 검토 대상으로 표시한다. `--run-id` 또는 `--route-key`로 해당 실행 기록에 검사 건수와 종류를 연결한다. 요청 문장과 소스 줄은 기록하지 않는다. 검사 출력의 diff는 현재 `HEAD` 대비 작업 트리 전체를 사용하므로, 작업 전에 이미 수정된 파일이 있다면 기존 변경과 새 변경을 사람이 구별해야 한다. 자세한 경계와 예시는 [실행 구조](docs/jev-auto-architecture.md)를 참고한다. 과거 MCP 시제품의 검증은 [1차 검증 기록](docs/phase1-verification.md)에 남겨 두었다.

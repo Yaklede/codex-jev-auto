@@ -110,12 +110,6 @@ def _policy_band(request: str, profile: Profile) -> str:
     lower = request.lower()
     if re.search(r"^\s*(?:please\s+)?(?:use|run|choose)\s+(?:gpt[- ]?6[- ]?)?astra\b", lower) or re.search(r"^\s*(?:gpt[- ]?6[- ]?)?astra로\s*(?:분석|작업|진행|해|봐)", lower):
         return "explicit_astra"
-    small = (
-        "typo", "spelling", "button label", "rename one", "optional field",
-        "오탈자", "문구 수정", "이름 변경", "단순 수정",
-    )
-    if profile.scope == "focused" and any(term in lower for term in small):
-        return "small"
     critical = (
         "race", "concurren", "duplicate payout", "rollback", "migration",
         "authorization", "privilege escalation", "security", "settlement",
@@ -131,6 +125,22 @@ def _policy_band(request: str, profile: Profile) -> str:
         return "frontier"
     if critical_hits:
         return "critical"
+    small = (
+        "typo", "spelling", "button label", "rename one", "optional field",
+        "오탈자", "문구 수정", "이름 변경", "단순 수정",
+    )
+    localized_setting = bool(
+        re.search(r"\b(?:one|single)\b.*\b(?:configuration|config|setting)\b.*\bfile\b", lower)
+        or re.search(r"\b(?:one|single)\b.*\b(?:config|setting|constant|unit test assertion)\b", lower)
+        or re.search(r"\b(?:config|setting|constant)\b.*\b(?:one|single)\b.*\bfile\b", lower)
+        or re.search(r"(?:설정|상수).*(?:하나|한 개|한 파일)", lower)
+    )
+    spread = any(term in lower for term in (
+        "across", "multiple", "multi-module", "several", "entire", "migration",
+        "refactor", "architecture", "여러", "전체", "전면", "마이그레이션", "리팩터", "아키텍처",
+    ))
+    if profile.scope == "focused" and not spread and (localized_setting or any(term in lower for term in small)):
+        return "small"
     if profile.scope == "broad" or any(term in lower for term in ("architecture", "redesign the entire", "아키텍처", "전면 개편")):
         return "complex"
     multi_part = (
@@ -153,6 +163,8 @@ def _eligible(candidate: Candidate, band: str) -> bool:
         return (model == "gpt-5.6-terra" and effort in ("medium", "high")) or (model == "gpt-6-sol" and effort == "medium")
     if band == "complex":
         return model == "gpt-6-sol" and effort in ("medium", "high", "xhigh", "max")
+    if band == "replan_review":
+        return model == "gpt-6-sol" and effort in ("high", "xhigh")
     if band == "frontier":
         return (model == "gpt-6-sol" and effort in ("high", "xhigh", "max")) or (model == "gpt-6-astra" and effort in ("low", "medium", "high"))
     if band == "frontier_plan":
@@ -256,12 +268,14 @@ async def _classify_unfamiliar_task(client: httpx.AsyncClient, url: str, request
 async def choose(
     request: str, profile: Profile, candidates: list[Candidate], jev_url: str,
     client: httpx.AsyncClient | None = None,
+    policy_band: str | None = None,
 ) -> Decision:
     if not candidates:
         raise RuntimeError("No requested model and reasoning pair is available")
     if len(candidates) == 1:
-        return Decision(candidates[0], "only_available_pair", None, 1, profile)
-    band = _policy_band(request, profile)
+        return Decision(candidates[0], "only_available_pair", None, 1, profile,
+                        policy_band or _policy_band(request, profile))
+    band = policy_band or _policy_band(request, profile)
     own_client = client is None
     if own_client:
         client = httpx.AsyncClient(timeout=60)

@@ -8,34 +8,49 @@ from .routing import Decision
 
 
 MARKER = "[Jev Auto orchestration]"
+BEHAVIOR_MARKER = "[Jev Auto behavior contract v1]"
+BEHAVIOR_POLICY = (
+    "For a broken mode or regression, define the user-visible behavior first. "
+    "Trace UI, saved settings, environment wiring, runtime path, and prior working behavior. "
+    "Determine mode semantics from product evidence, then verify the behavior where offered. "
+    "Error-code changes alone are not recovery. Ask the user to choose an implementation "
+    "only if the product contract remains ambiguous."
+)
+REPLAN_MARKER = "[Jev Auto replanning contract v1]"
+REPLAN_POLICY = (
+    "When the same user goal remains unmet after at least two materially different attempts or "
+    "repeated user corrections, review the actual failures, acceptance criteria, and assumptions. "
+    "Distinguish valid negative experiment results from an agent reasoning failure. If a new "
+    "high-level plan could change the approach, explain the evidence and ask for approval for an "
+    "Astra planning subagent. Never call Astra before approval; Astra plans only and Sol implements. "
+    "If the available evidence or constraints cannot support the requested result, report that "
+    "limit instead of promising success or repeatedly tuning against the same data."
+)
 
 
-def apply(payload: dict[str, Any], decision: Decision) -> dict[str, Any]:
+def apply(payload: dict[str, Any], decision: Decision, route_key: str | None = None) -> dict[str, Any]:
     """Keep existing Codex instructions and add a bounded delegation policy."""
     instruction = (
         f"{MARKER}\n"
-        "This is the user's existing main Codex task. Keep it as coordinator; do not create "
-        "separate user-facing tasks. For each new work request, decide whether it contains "
-        "genuinely independent, bounded work streams such as separate features, modules, "
-        "or code reviews. If two or more such streams can run concurrently, spawn one "
-        "native Codex subagent per stream in parallel before doing the stream-specific "
-        "implementation or review in the main task. Wait for their results. Parallel "
-        "shell commands by the main task do not replace subagent delegation. Do not "
-        "require the user to invoke a plugin or repeat a delegation request. For one "
-        "small or tightly coupled task, work directly in the main task. If native "
-        "subagents are unavailable, continue in the main task and report that limit. "
-        "Keep requirements, task division, integration, final code review, and verification "
-        "in the main task. Avoid parallel agents editing the same files; assign disjoint "
-        "ownership or isolate their checkouts. "
-        "Before spawning each delegated subtask, run "
-        "~/.local/share/jev-router/bin/jev-auto route '<subtask>' --workspace "
-        "'<absolute repository path>'. Spawn with the "
-        "returned concrete model and reasoning effort, never with the virtual jev-auto model. "
-        "After reviewing the result, record its actual agent ID and checks with the same "
-        "CLI's finish command. Do not recursively delegate from a subagent. "
-        "If Astra is recommended, ask for explicit user approval before any Astra call; "
-        "Astra only plans, then Sol implements. User instructions and higher-priority "
-        "Codex policies take precedence."
+        "Keep this task as coordinator. For independent bounded streams, run "
+        "~/.local/share/jev-router/bin/jev-auto route '<subtask>' --workspace '<absolute repo>' "
+        "before spawning one native Codex subagent per stream in parallel with the chosen concrete "
+        "model and effort. Give agents disjoint files; wait, integrate, review, and record each "
+        "agent/check with jev-auto finish. Work here for small or coupled tasks. Do not create "
+        "user-facing tasks or recursively delegate. For code/UI edits, run jev-auto quality-context "
+        "'<request>' --workspace '<repo>' before editing; note acceptance, existing patterns, "
+        "and planned paths. After editing run jev-auto quality-check '<request>' --workspace "
+        "'<repo>' with --allowed-path for planned paths. Review findings, diff, tests, and rendered "
+        "screen states. For React or KMP/CMP UI, use quality-context with --focus-path to "
+        "identify nearby components, theme, layout, and state patterns before implementation. "
+        "After implementation, inspect the rendered screen at relevant sizes and states, "
+        "compare its visual hierarchy with adjacent screens, and review framework-specific "
+        "performance evidence; static findings alone do not prove design or speed. "
+        "Direct JDBC in a JPA+QueryDSL repo needs an explicit reason and "
+        "--allow-jdbc --jdbc-reason. Keep small edits small. Astra requires user approval; "
+        "Astra plans only, then Sol implements. Follow higher-priority instructions."
+        f"\n{BEHAVIOR_MARKER}\n{BEHAVIOR_POLICY}"
+        f"\n{REPLAN_MARKER}\n{REPLAN_POLICY}"
     )
     if decision.candidate.requires_confirmation:
         instruction += (
@@ -44,11 +59,45 @@ def apply(payload: dict[str, Any], decision: Decision) -> dict[str, Any]:
             "non-Astra coordinator model. Ask for approval before spawning the Astra "
             "planning subagent."
         )
+    elif decision.policy_band == "replan_review":
+        instruction += (
+            "\nThis request has repeated-failure signals. Review the prior attempts before "
+            "continuing. Decide from evidence whether Astra planning would help; if so, ask "
+            "for user approval before any Astra call."
+        )
+    if route_key:
+        instruction += (
+            f"\nMain route key: {route_key}. For completed repository work, record observed checks "
+            "with jev-auto auto-outcome ROUTE_KEY --status completed|failed|interrupted --check; "
+            "pass --route-key to quality-check. For later feedback, find the earlier target via "
+            "auto-runs before auto-feedback; "
+            "unknown usage stays unknown."
+        )
     updated = dict(payload)
     existing = updated.get("instructions")
     if isinstance(existing, str):
         if MARKER not in existing:
             updated["instructions"] = existing + "\n\n" + instruction
+        else:
+            # Long-running tasks may carry older policies. Add each revision once.
+            additions = []
+            if BEHAVIOR_MARKER not in existing:
+                additions.append(f"{BEHAVIOR_MARKER}\n{BEHAVIOR_POLICY}")
+            if REPLAN_MARKER not in existing:
+                additions.append(f"{REPLAN_MARKER}\n{REPLAN_POLICY}")
+            if decision.candidate.requires_confirmation:
+                approval_marker = f"[Jev Auto Astra recommendation {route_key or 'current'}]"
+                if approval_marker not in existing:
+                    additions.append(approval_marker + f"\nJev recommended {decision.candidate.model}/"
+                                     f"{decision.candidate.effort} for planning. Ask for approval "
+                                     "before spawning an Astra planning subagent.")
+            elif decision.policy_band == "replan_review":
+                review_marker = f"[Jev Auto replan review {route_key or 'current'}]"
+                if review_marker not in existing:
+                    additions.append(review_marker + "\nReview prior failures and decide whether "
+                                     "Astra planning would help. Ask for approval before any Astra call.")
+            if additions:
+                updated["instructions"] = existing + "\n\n" + "\n".join(additions)
     elif existing is None:
         updated["instructions"] = instruction
     # The Responses request contract defines instructions as a string. Preserve

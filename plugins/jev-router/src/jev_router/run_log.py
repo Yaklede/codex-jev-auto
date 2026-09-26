@@ -116,6 +116,39 @@ def finish(directory: Path, run_id: str, status: str, checks: list[str], agents:
     return record
 
 
+def record_quality(directory: Path, run_id: str, report: dict[str, Any]) -> dict[str, Any]:
+    """Attach reproducible check counts without retaining source lines or user text."""
+    path = _path(directory, run_id)
+    with _locked_runs(directory):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if record["state"] != "routed":
+            raise ValueError("Record quality before finishing the run")
+        if record.get("workspace") != report.get("workspace"):
+            raise ValueError("Quality report workspace does not match routed run")
+        severities: dict[str, int] = {}
+        for finding in report.get("findings", []):
+            severity = finding.get("severity", "review")
+            severities[severity] = severities.get(severity, 0) + 1
+        record["quality_review"] = {
+            "recorded_at": _now(),
+            "changed_files": len(report.get("changed_paths", [])),
+            "out_of_scope_files": sum(
+                finding.get("message") == "Changed path is outside the planned scope"
+                for finding in report.get("findings", [])
+            ),
+            "backend_profile": report.get("backend", {}).get("status"),
+            "frontend_visual_review_required": bool(report.get("frontend", {}).get("review_required")),
+            "compose_visual_review_required": bool(report.get("compose", {}).get("review_required")),
+            "visual_review_required": bool(
+                report.get("frontend", {}).get("review_required")
+                or report.get("compose", {}).get("review_required")
+            ),
+            "finding_counts": severities,
+        }
+        _write(path, record)
+    return record["quality_review"]
+
+
 def feedback(directory: Path, run_id: str, rating: str, note: str | None) -> dict[str, Any]:
     if rating not in {"good", "bad", "mixed"}:
         raise ValueError("Invalid feedback rating")

@@ -23,7 +23,8 @@ from .auto_catalog import sync_catalog
 from .auto_proxy import create_app, data_directory
 from .auto_routing import AutoRouter
 from .doctor import diagnose
-from . import run_log
+from .quality import inspect_quality
+from . import auto_outcome, run_log
 
 
 LABEL = "com.jevrouter.auto"
@@ -190,6 +191,29 @@ def main() -> None:
     feedback.add_argument("--note")
     recent = sub.add_parser("runs", help="Show recent routing decisions and outcomes")
     recent.add_argument("--limit", type=int, default=10)
+    auto_recent = sub.add_parser("auto-runs", help="Show Jev Auto main-turn choices, observed usage, and outcomes")
+    auto_recent.add_argument("--limit", type=int, default=10)
+    auto_finish = sub.add_parser("auto-outcome", help="Record verified outcome for a main Jev Auto route")
+    auto_finish.add_argument("route_key")
+    auto_finish.add_argument("--status", choices=("completed", "failed", "interrupted"), required=True)
+    auto_finish.add_argument("--check", action="append", default=[])
+    auto_finish.add_argument("--revisions", type=int, help="Observed correction rounds, if known")
+    auto_feedback = sub.add_parser("auto-feedback", help="Attach explicit user feedback to a main Jev Auto route")
+    auto_feedback.add_argument("route_key")
+    auto_feedback.add_argument("--rating", choices=("good", "bad", "mixed"), required=True)
+    auto_feedback.add_argument("--note")
+    context = sub.add_parser("quality-context", help="Inspect repository conventions before implementation")
+    context.add_argument("request")
+    context.add_argument("--workspace", type=Path, required=True)
+    context.add_argument("--focus-path", action="append", default=[], help="Likely affected file or directory; repeat as needed")
+    review = sub.add_parser("quality-check", help="Review changed paths and repository conventions")
+    review.add_argument("request")
+    review.add_argument("--workspace", type=Path, required=True)
+    review.add_argument("--allowed-path", action="append", default=[], help="Planned path or glob; repeat for each scope")
+    review.add_argument("--allow-jdbc", action="store_true", help="Explicitly permit direct JDBC for this task")
+    review.add_argument("--jdbc-reason", help="Required explanation when --allow-jdbc is used")
+    review.add_argument("--run-id", help="Attach redacted quality check counts to this routed run")
+    review.add_argument("--route-key", help="Attach redacted quality check counts to a main Jev Auto route")
     args = parser.parse_args()
     if args.command == "serve":
         uvicorn.run(create_app(), host="127.0.0.1", port=args.port, access_log=False, log_level="warning")
@@ -213,6 +237,26 @@ def main() -> None:
             result = run_log.finish(data_directory(), args.run_id, args.status, args.check, args.agent)
         elif args.command == "feedback":
             result = run_log.feedback(data_directory(), args.run_id, args.rating, args.note)
+        elif args.command == "auto-runs":
+            result = auto_outcome.recent(data_directory(), args.limit)
+        elif args.command == "auto-outcome":
+            result = auto_outcome.outcome(data_directory(), args.route_key, args.status, args.check, args.revisions)
+        elif args.command == "auto-feedback":
+            result = auto_outcome.feedback(data_directory(), args.route_key, args.rating, args.note)
+        elif args.command == "quality-context":
+            result = inspect_quality(args.workspace, request=args.request, focus_paths=args.focus_path)
+        elif args.command == "quality-check":
+            if args.allow_jdbc and not (args.jdbc_reason and args.jdbc_reason.strip()):
+                raise ValueError("--allow-jdbc requires --jdbc-reason")
+            result = inspect_quality(
+                args.workspace, request=args.request, review=True,
+                allowed_paths=args.allowed_path, allow_jdbc=args.allow_jdbc,
+                jdbc_reason=args.jdbc_reason if args.allow_jdbc else None,
+            )
+            if args.run_id:
+                result["recorded_quality"] = run_log.record_quality(data_directory(), args.run_id, result)
+            if args.route_key:
+                result["recorded_auto_quality"] = auto_outcome.quality(data_directory(), args.route_key, result)["quality_review"]
         else:
             if not 1 <= args.limit <= 100:
                 raise ValueError("--limit must be between 1 and 100")
